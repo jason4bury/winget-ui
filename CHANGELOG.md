@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented here.
 
+## [1.7.1] - 2026-09-18
+### Added
+- The About dialog now shows the app's own version number (alongside the detected winget CLI
+  version), sourced from a new `$script:AppVersion` variable at the top of the script.
+
 ## [1.7.0] - 2026-09-18
 ### Added
 - "Remove new desktop icons after install/upgrade" checkbox (on by default). Before **Upgrade All**

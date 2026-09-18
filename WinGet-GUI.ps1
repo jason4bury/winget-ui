@@ -11,7 +11,7 @@
 #>
 
 # Bump this whenever you ship a change worth noting in CHANGELOG.md.
-$script:AppVersion = '1.7.0'
+$script:AppVersion = '1.7.1'
 
 # WPF needs an STA thread. Windows PowerShell defaults to STA, but PowerShell 7 (pwsh)
 # defaults to MTA, so relaunch ourselves with -STA if needed.
