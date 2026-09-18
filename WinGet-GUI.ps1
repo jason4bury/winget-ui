@@ -47,15 +47,27 @@ if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <WrapPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
-            <Button x:Name="BtnCheck" Content="Check for Updates" Width="150" Height="30" Margin="0,0,8,8"/>
-            <Button x:Name="BtnUpgradeSelected" Content="Upgrade Selected" Width="140" Height="30" Margin="0,0,8,8"/>
-            <Button x:Name="BtnUpgradeAll" Content="Upgrade All" Width="120" Height="30" Margin="0,0,8,8"/>
-            <Button x:Name="BtnResetSources" Content="Reset Sources" Width="120" Height="30" Margin="0,0,8,8"/>
-            <Button x:Name="BtnDiagnose" Content="Diagnose Network" Width="130" Height="30" Margin="0,0,8,8"/>
-            <CheckBox x:Name="ChkIncludeUnknown" Content="Include unknown versions" VerticalAlignment="Center" Margin="12,0,0,8" IsChecked="True"/>
-            <CheckBox x:Name="ChkSkipStore" Content="Skip Microsoft Store (msstore) source" VerticalAlignment="Center" Margin="12,0,0,8" IsChecked="True"/>
-        </WrapPanel>
+        <Grid Grid.Row="0" Margin="0,0,0,8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <WrapPanel Grid.Column="0" Orientation="Horizontal">
+                <Button x:Name="BtnCheck" Content="Check for Updates" Width="150" Height="30" Margin="0,0,8,8"/>
+                <Button x:Name="BtnUpgradeSelected" Content="Upgrade Selected" Width="140" Height="30" Margin="0,0,8,8"/>
+                <Button x:Name="BtnUpgradeAll" Content="Upgrade All" Width="120" Height="30" Margin="0,0,8,8"/>
+                <Button x:Name="BtnResetSources" Content="Reset Sources" Width="120" Height="30" Margin="0,0,8,8"/>
+                <Button x:Name="BtnDiagnose" Content="Diagnose Network" Width="130" Height="30" Margin="0,0,8,8"/>
+                <CheckBox x:Name="ChkIncludeUnknown" Content="Include unknown versions" VerticalAlignment="Center" Margin="12,0,0,8" IsChecked="True"/>
+                <CheckBox x:Name="ChkSkipStore" Content="Skip Microsoft Store (msstore) source" VerticalAlignment="Center" Margin="12,0,0,8" IsChecked="True"/>
+            </WrapPanel>
+
+            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top">
+                <Button x:Name="BtnAbout" Content="About" Width="80" Height="30" Margin="12,0,8,0"/>
+                <Button x:Name="BtnExit" Content="Exit" Width="80" Height="30"/>
+            </StackPanel>
+        </Grid>
 
         <DataGrid x:Name="Grid1" Grid.Row="1" AutoGenerateColumns="False" IsReadOnly="True"
                   SelectionMode="Single" SelectionUnit="FullRow" AlternatingRowBackground="#F3F3F3"
@@ -88,6 +100,8 @@ $btnUpgradeSelected = $window.FindName('BtnUpgradeSelected')
 $btnUpgradeAll      = $window.FindName('BtnUpgradeAll')
 $btnResetSources    = $window.FindName('BtnResetSources')
 $btnDiagnose        = $window.FindName('BtnDiagnose')
+$btnAbout           = $window.FindName('BtnAbout')
+$btnExit            = $window.FindName('BtnExit')
 $chkIncludeUnknown  = $window.FindName('ChkIncludeUnknown')
 $chkSkipStore       = $window.FindName('ChkSkipStore')
 $dataGrid           = $window.FindName('Grid1')
@@ -349,6 +363,11 @@ $timer.Add_Tick({
             'check' {
                 $lines = @()
                 if ($finalContent) { $lines = $finalContent -split "`r?`n" }
+                # @() guards against PowerShell unwrapping a single-item result into a bare
+                # object instead of a one-element array — DataGrid.ItemsSource requires an
+                # IEnumerable and throws ("Cannot convert ... to System.Collections.IEnumerable")
+                # if handed a lone PSCustomObject, which happens whenever exactly one upgrade
+                # is found.
                 $rows = @(ConvertFrom-WingetUpgradeTable -Lines $lines)
                 $dataGrid.ItemsSource = $rows
 
@@ -402,6 +421,29 @@ $btnResetSources.Add_Click({
 })
 
 $btnDiagnose.Add_Click({ Start-NetworkDiagnostics })
+
+$btnAbout.Add_Click({
+    $wingetVersion = try { (& winget --version) } catch { 'unknown' }
+    [System.Windows.MessageBox]::Show(
+        "Winget Update Manager`r`n`r`n" +
+        "A simple GUI front end for winget (Windows Package Manager).`r`n`r`n" +
+        "Checks for available updates, upgrades a selected package or everything at once, " +
+        "and includes tools to reset winget's sources and diagnose network issues when " +
+        "package searches fail.`r`n`r`n" +
+        "Detected winget version: $wingetVersion",
+        "About Winget Update Manager", 'OK', 'Information') | Out-Null
+})
+
+$btnExit.Add_Click({
+    if ($script:proc -and -not $script:proc.HasExited) {
+        $confirm = [System.Windows.MessageBox]::Show(
+            "A winget operation is still running. Exit anyway?",
+            "Confirm Exit", 'YesNo', 'Warning')
+        if ($confirm -ne 'Yes') { return }
+        try { $script:proc.Kill() } catch { }
+    }
+    $window.Close()
+})
 
 $btnUpgradeSelected.Add_Click({
     $item = $dataGrid.SelectedItem
