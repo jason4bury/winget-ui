@@ -10,6 +10,9 @@
         powershell -ExecutionPolicy Bypass -File .\Winget-GUI.ps1
 #>
 
+# Bump this whenever you ship a change worth noting in CHANGELOG.md.
+$script:AppVersion = '1.7.0'
+
 # WPF needs an STA thread. Windows PowerShell defaults to STA, but PowerShell 7 (pwsh)
 # defaults to MTA, so relaunch ourselves with -STA if needed.
 if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA') {
@@ -468,7 +471,8 @@ $btnDiagnose.Add_Click({ Start-NetworkDiagnostics })
 $btnAbout.Add_Click({
     $wingetVersion = try { (& winget --version) } catch { 'unknown' }
     [System.Windows.MessageBox]::Show(
-        "Winget Update Manager`r`n`r`n" +
+        "Winget Update Manager`r`n" +
+        "Version $script:AppVersion`r`n`r`n" +
         "A simple GUI front end for winget (Windows Package Manager).`r`n`r`n" +
         "Checks for available updates, upgrades a selected package or everything at once, " +
         "and includes tools to reset winget's sources and diagnose network issues when " +
