@@ -4,9 +4,11 @@ All notable changes to this project are documented here.
 
 ## [1.6.1] - 2026-09-18
 ### Fixed
-- `DataGrid.ItemsSource` crashed with a `SetValueInvocationException` whenever exactly one
-  update was found, because PowerShell unwraps a single-item array into a bare object on
-  return. Fixed by wrapping the result in `@()` before assigning it.
+- `DataGrid.ItemsSource` crashed with a `SetValueInvocationException` ("Cannot convert ... to
+  System.Collections.IEnumerable") whenever `winget upgrade` found exactly one available update.
+  PowerShell unwraps a single-item array into a bare object on return, so the parsed result list
+  is now wrapped in `@(...)` before being assigned to `ItemsSource`, guaranteeing it stays an
+  array whether there are 0, 1, or many rows.
 
 ## [1.6.0] - 2026-09-17
 ### Added
