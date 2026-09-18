@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here.
 
+## [1.6.1] - 2026-09-18
+### Fixed
+- `DataGrid.ItemsSource` crashed with a `SetValueInvocationException` whenever exactly one
+  update was found, because PowerShell unwraps a single-item array into a bare object on
+  return. Fixed by wrapping the result in `@()` before assigning it.
+
 ## [1.6.0] - 2026-09-17
 ### Added
 - About and Exit buttons, top-right of the toolbar.
