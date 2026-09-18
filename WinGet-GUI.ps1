@@ -349,7 +349,7 @@ $timer.Add_Tick({
             'check' {
                 $lines = @()
                 if ($finalContent) { $lines = $finalContent -split "`r?`n" }
-                $rows = ConvertFrom-WingetUpgradeTable -Lines $lines
+                $rows = @(ConvertFrom-WingetUpgradeTable -Lines $lines)
                 $dataGrid.ItemsSource = $rows
 
                 Set-UiBusy -Busy $false -Status "$($rows.Count) update(s) available."
