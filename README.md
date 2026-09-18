@@ -13,6 +13,7 @@ A small PowerShell + WPF front end for [winget](https://learn.microsoft.com/en-u
 - **Diagnose Network** — checks WinHTTP vs. WinINet proxy configuration and reachability to winget's backend hosts, for tracking down "failed to search source" errors caused by proxies or content filters.
 - Checkbox to skip the Microsoft Store (`msstore`) source, which avoids a recurring source-agreement prompt on machines where it's never been accepted interactively.
 - Checkbox to include packages with unknown/undetectable versions (`--include-unknown`).
+- Checkbox to automatically remove any new desktop icons (`.lnk`/`.url`, on either your Desktop or the shared Public Desktop) that an install/upgrade creates, so **Upgrade All**/**Upgrade Selected** don't leave a trail of shortcuts behind.
 - About and Exit buttons.
 
 ## Requirements

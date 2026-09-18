@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here.
 
+## [1.7.0] - 2026-09-18
+### Added
+- "Remove new desktop icons after install/upgrade" checkbox (on by default). Before **Upgrade All**
+  or **Upgrade Selected** runs, the script snapshots every `.lnk`/`.url` shortcut on the current
+  user's Desktop and the shared Public Desktop; once the upgrade finishes, any shortcuts that
+  weren't there before are deleted automatically, so installers/updaters that drop a desktop icon
+  don't leave one behind.
+
 ## [1.6.1] - 2026-09-18
 ### Fixed
 - `DataGrid.ItemsSource` crashed with a `SetValueInvocationException` ("Cannot convert ... to

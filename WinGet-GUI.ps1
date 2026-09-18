@@ -61,6 +61,7 @@ if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
                 <Button x:Name="BtnDiagnose" Content="Diagnose Network" Width="130" Height="30" Margin="0,0,8,8"/>
                 <CheckBox x:Name="ChkIncludeUnknown" Content="Include unknown versions" VerticalAlignment="Center" Margin="12,0,0,8" IsChecked="True"/>
                 <CheckBox x:Name="ChkSkipStore" Content="Skip Microsoft Store (msstore) source" VerticalAlignment="Center" Margin="12,0,0,8" IsChecked="True"/>
+                <CheckBox x:Name="ChkRemoveDesktopIcons" Content="Remove new desktop icons after install/upgrade" VerticalAlignment="Center" Margin="12,0,0,8" IsChecked="True"/>
             </WrapPanel>
 
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top">
@@ -104,6 +105,7 @@ $btnAbout           = $window.FindName('BtnAbout')
 $btnExit            = $window.FindName('BtnExit')
 $chkIncludeUnknown  = $window.FindName('ChkIncludeUnknown')
 $chkSkipStore       = $window.FindName('ChkSkipStore')
+$chkRemoveDesktopIcons = $window.FindName('ChkRemoveDesktopIcons')
 $dataGrid           = $window.FindName('Grid1')
 $txtStatus          = $window.FindName('TxtStatus')
 $txtLog             = $window.FindName('TxtLog')
@@ -118,6 +120,7 @@ $script:tempErr       = $null
 $script:lastOutLength = 0
 $script:lastErrLength = 0
 $script:mode          = $null
+$script:preShortcuts = $null
 
 $timer = New-Object System.Windows.Threading.DispatcherTimer
 $timer.Interval = [TimeSpan]::FromMilliseconds(400)
@@ -212,6 +215,41 @@ function ConvertFrom-WingetUpgradeTable {
     }
 
     return $results
+}
+
+function Get-DesktopShortcutSnapshot {
+    # Covers both the current user's Desktop and the shared "Public" Desktop, since
+    # installers can drop a shortcut in either depending on install scope.
+    $paths = @()
+    foreach ($folder in @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('CommonDesktopDirectory'))) {
+        if ($folder -and (Test-Path $folder)) {
+            $paths += Get-ChildItem -Path $folder -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.Extension -in '.lnk', '.url' } |
+                Select-Object -ExpandProperty FullName
+        }
+    }
+    return @($paths)
+}
+
+function Remove-NewDesktopShortcuts {
+    param([string[]]$Before)
+
+    if (-not $Before) { return }
+
+    $after = Get-DesktopShortcutSnapshot
+    $new   = @($after | Where-Object { $Before -notcontains $_ })
+
+    if ($new.Count -gt 0) {
+        Append-Log "`r`nRemoving $($new.Count) new desktop icon(s) created by this install/upgrade:`r`n"
+        foreach ($p in $new) {
+            try {
+                Remove-Item -Path $p -Force -ErrorAction Stop
+                Append-Log "  Removed: $p`r`n"
+            } catch {
+                Append-Log "  Could not remove ${p}: $($_.Exception.Message)`r`n"
+            }
+        }
+    }
 }
 
 function Start-WingetOperation {
@@ -375,11 +413,15 @@ $timer.Add_Tick({
                 Append-Log "`r`n$($rows.Count) update(s) available.`r`n"
             }
             'upgradeAll' {
-                Append-Log "`r`nUpgrade All finished. Refreshing list...`r`n"
+                Append-Log "`r`nUpgrade All finished.`r`n"
+                if ($chkRemoveDesktopIcons.IsChecked) { Remove-NewDesktopShortcuts -Before $script:preShortcuts }
+                Append-Log "`r`nRefreshing list...`r`n"
                 Start-CheckForUpdates
             }
             'upgradeOne' {
-                Append-Log "`r`nUpgrade finished. Refreshing list...`r`n"
+                Append-Log "`r`nUpgrade finished.`r`n"
+                if ($chkRemoveDesktopIcons.IsChecked) { Remove-NewDesktopShortcuts -Before $script:preShortcuts }
+                Append-Log "`r`nRefreshing list...`r`n"
                 Start-CheckForUpdates
             }
             'resetSources' {
@@ -404,6 +446,7 @@ $btnUpgradeAll.Add_Click({
         "Run 'winget upgrade --all' now? This will upgrade every package winget can update.",
         "Confirm Upgrade All", 'YesNo', 'Question')
     if ($confirm -eq 'Yes') {
+        if ($chkRemoveDesktopIcons.IsChecked) { $script:preShortcuts = Get-DesktopShortcutSnapshot }
         $src = Get-SourceArg
         Start-WingetOperation -Arguments "upgrade --all $src --accept-package-agreements --accept-source-agreements --disable-interactivity" `
             -Mode 'upgradeAll' -StatusText 'Upgrading all packages...'
@@ -455,6 +498,7 @@ $btnUpgradeSelected.Add_Click({
         "Upgrade '$($item.Name)' ($($item.Id)) now?",
         "Confirm Upgrade", 'YesNo', 'Question')
     if ($confirm -eq 'Yes') {
+        if ($chkRemoveDesktopIcons.IsChecked) { $script:preShortcuts = Get-DesktopShortcutSnapshot }
         $escapedId = $item.Id
         Start-WingetOperation -Arguments "upgrade --id `"$escapedId`" -e --accept-package-agreements --accept-source-agreements --disable-interactivity" `
             -Mode 'upgradeOne' -StatusText "Upgrading $($item.Name)..."
