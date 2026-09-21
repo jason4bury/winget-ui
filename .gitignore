@@ -1,0 +1,9 @@
+# Windows / PowerShell
+*.log
+*.tmp
+Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/
+*.swp
