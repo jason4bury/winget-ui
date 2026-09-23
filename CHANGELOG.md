@@ -10,6 +10,7 @@ All notable changes to this project are documented here.
   other row) via `winget install --id <id> -e`, with the same confirmation prompt, live log
   output, and automatic desktop-icon cleanup as the existing upgrade actions.
 - Pressing Enter in the search box now runs the search too.
+- About dialog text updated to mention searching for and installing new software.
 
 ### Changed
 - The table parser (`ConvertFrom-WingetUpgradeTable`) now detects which columns are actually
