@@ -39,14 +39,14 @@ if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
 [xml]$xaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Winget Update Manager" Height="660" Width="1300" MinWidth="620"
+        Title="Winget Update Manager" Height="760" Width="1300" MinWidth="620"
         WindowStartupLocation="CenterScreen">
     <Grid Margin="10">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="180"/>
+            <RowDefinition Height="280"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
