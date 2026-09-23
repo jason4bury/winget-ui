@@ -11,10 +11,38 @@
 #>
 
 # Bump this whenever you ship a change worth noting in CHANGELOG.md.
-$script:AppVersion = '1.8.0'
+$script:AppVersion = '1.9.0'
+
+# ---------------------------------------------------------------------------
+# Installing/upgrading software and managing shortcuts on the shared Public
+# Desktop both normally need administrator rights, so relaunch elevated
+# automatically if we're not already running as admin, rather than hitting
+# "Access is denied" errors partway through.
+# ---------------------------------------------------------------------------
+$currentIdentity  = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+$currentPrincipal = New-Object System.Security.Principal.WindowsPrincipal($currentIdentity)
+if (-not $currentPrincipal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    $exe = (Get-Process -Id $PID).Path
+    try {
+        # -STA is included here too so an elevated relaunch satisfies both requirements
+        # (admin rights and a WPF-compatible thread) in a single relaunch.
+        Start-Process -FilePath $exe -ArgumentList @('-NoProfile', '-STA', '-File', "`"$PSCommandPath`"") -Verb RunAs | Out-Null
+    } catch {
+        # Most likely the UAC prompt was cancelled, or this account can't elevate at all.
+        Add-Type -AssemblyName System.Windows.Forms
+        [System.Windows.Forms.MessageBox]::Show(
+            "Winget Update Manager needs to run as Administrator (installing/upgrading software " +
+            "and managing the shared Public Desktop both require it), but elevation was cancelled " +
+            "or failed.`r`n`r`n$($_.Exception.Message)",
+            "Winget GUI", 'OK', 'Error') | Out-Null
+    }
+    exit
+}
 
 # WPF needs an STA thread. Windows PowerShell defaults to STA, but PowerShell 7 (pwsh)
-# defaults to MTA, so relaunch ourselves with -STA if needed.
+# defaults to MTA, so relaunch ourselves with -STA if needed. (Normally already satisfied
+# by the elevation relaunch above, but this covers running the script from an already-
+# elevated pwsh session directly.)
 if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA') {
     $exe = (Get-Process -Id $PID).Path
     Start-Process -FilePath $exe -ArgumentList @('-NoProfile', '-STA', '-File', "`"$PSCommandPath`"")
@@ -280,7 +308,29 @@ function Remove-NewDesktopShortcuts {
                 Remove-Item -Path $p -Force -ErrorAction Stop
                 Append-Log "  Removed: $p`r`n"
             } catch {
-                Append-Log "  Could not remove ${p}: $($_.Exception.Message)`r`n"
+                # Some installers (e.g. Adobe Acrobat) self-elevate via their own UAC prompt to write
+                # to the shared Public Desktop, even when this script itself is not running elevated.
+                # That leaves the icon owned/locked in a way our own (non-elevated) process can't
+                # delete, so on "access denied" specifically, retry the delete via a one-off elevated
+                # process instead of just giving up.
+                if ($_.Exception -is [System.UnauthorizedAccessException] -or $_.Exception.Message -match 'is denied') {
+                    Append-Log "  Access denied removing $p directly; requesting elevation to remove it...`r`n"
+                    try {
+                        $escapedPath = $p.Replace("'", "''")
+                        $elevArgs = "-NoProfile -WindowStyle Hidden -Command `"Remove-Item -LiteralPath '$escapedPath' -Force -ErrorAction Stop`""
+                        Start-Process -FilePath 'powershell.exe' -ArgumentList $elevArgs -Verb RunAs -WindowStyle Hidden -Wait -ErrorAction Stop
+
+                        if (Test-Path -LiteralPath $p) {
+                            Append-Log "  Still present after elevated attempt: $p`r`n"
+                        } else {
+                            Append-Log "  Removed (elevated): $p`r`n"
+                        }
+                    } catch {
+                        Append-Log "  Elevation request failed or was declined for ${p}: $($_.Exception.Message)`r`n"
+                    }
+                } else {
+                    Append-Log "  Could not remove ${p}: $($_.Exception.Message)`r`n"
+                }
             }
         }
     }

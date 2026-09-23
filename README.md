@@ -16,10 +16,12 @@ A small PowerShell + WPF front end for [winget](https://learn.microsoft.com/en-u
 - Checkbox to include packages with unknown/undetectable versions (`--include-unknown`).
 - Checkbox to automatically remove any new desktop icons (`.lnk`/`.url`, on either your Desktop or the shared Public Desktop) that an install/upgrade creates, so **Upgrade All**/**Upgrade Selected**/**Install Selected** don't leave a trail of shortcuts behind. Keeps checking for 20 seconds after the operation finishes, since some installers create their shortcut via a background process rather than immediately.
 - About and Exit buttons.
+- Relaunches itself elevated (as Administrator) automatically on launch if it isn't already, since installing/upgrading software and managing the shared Public Desktop both normally require it.
 
 ## Requirements
 
 - Windows 10 or 11 with [App Installer](https://apps.microsoft.com/detail/9nblggh4nns1) (which provides `winget`) installed.
+- Administrator rights. The script will prompt for elevation (UAC) automatically on launch if it isn't already running as admin.
 - PowerShell 5.1 (built into Windows) or PowerShell 7+. The script detects which one it's running under and relaunches itself in STA mode automatically if needed (WPF requires an STA thread, and PowerShell 7 defaults to MTA).
 
 ## Usage

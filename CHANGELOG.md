@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented here.
 
+## [1.9.0] - 2026-09-23
+### Added
+- The script now checks whether it's running as Administrator on launch and, if not,
+  relaunches itself elevated (a single UAC prompt) automatically, since installing/upgrading
+  software and managing the shared Public Desktop both normally require it. Avoids hitting
+  "Access is denied" errors partway through instead of asking for elevation up front. If
+  elevation is cancelled or the account can't elevate, a message box explains why and the
+  app exits.
+
+## [1.8.1] - 2026-09-23
+### Fixed
+- Removing a new desktop icon from the shared Public Desktop could fail with "Access to the
+  path ... is denied" — some installers (Adobe Acrobat is one) self-elevate via their own UAC
+  prompt to write there even when this script itself isn't running elevated, so the script's own
+  (non-elevated) delete gets blocked. Deletion now retries via a one-off elevated process
+  (a single UAC prompt) when it hits an access-denied error on that specific file.
+
 ## [1.8.0] - 2026-09-23
 ### Added
 - **Search** box + **Search** button: runs `winget search "<query>"` and lists the results in the
