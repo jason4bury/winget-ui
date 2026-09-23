@@ -11,7 +11,7 @@
 #>
 
 # Bump this whenever you ship a change worth noting in CHANGELOG.md.
-$script:AppVersion = '1.9.1'
+$script:AppVersion = '1.9.2'
 
 # ---------------------------------------------------------------------------
 # If this script has been compiled to a standalone .exe (e.g. with the ps2exe

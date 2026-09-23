@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented here.
 
-## [Unreleased]
+## [1.9.2] - 2026-09-23
 ### Added
 - `WinGet-GUI.ico`: a multi-resolution app icon, and a `-iconFile` example in the ps2exe build
   command so the compiled `.exe` gets its own icon instead of the generic PowerShell one.
