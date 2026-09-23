@@ -635,7 +635,8 @@ $btnAbout.Add_Click({
         "A simple GUI front end for winget (Windows Package Manager).`r`n`r`n" +
         "Checks for available updates, upgrades a selected package or everything at once, " +
         "lets you search for new software and install it, and includes tools to reset " +
-        "winget's sources and diagnose network issues when package searches fail.`r`n`r`n" +
+        "winget's sources and diagnose network issues when package searches fail. Runs " +
+        "elevated (as Administrator) automatically.`r`n`r`n" +
         "Detected winget version: $wingetVersion",
         "About Winget Update Manager", 'OK', 'Information') | Out-Null
 })

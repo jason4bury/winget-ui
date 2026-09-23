@@ -10,6 +10,7 @@ All notable changes to this project are documented here.
   "Access is denied" errors partway through instead of asking for elevation up front. If
   elevation is cancelled or the account can't elevate, a message box explains why and the
   app exits.
+- About dialog text updated to mention that it runs elevated automatically.
 
 ## [1.8.1] - 2026-09-23
 ### Fixed
