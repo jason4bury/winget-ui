@@ -39,7 +39,13 @@ No installation, no dependencies beyond winget itself.
 If you'd rather distribute a single `.exe` than a `.ps1` (e.g. for deployment via Intune), you can compile it with the free, open-source [ps2exe](https://github.com/MScholtes/PS2EXE) module. This has to be run on a real Windows PowerShell/pwsh install — it can't be produced any other way:
 
 ```powershell
+# -Scope Process only affects this one console window, not the machine-wide policy — needed
+# because ps2exe's own module file won't load under PowerShell's default "Restricted" policy.
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+
 Install-Module -Name ps2exe -Scope CurrentUser -Force
+Import-Module ps2exe
+
 Invoke-ps2exe -inputFile .\WinGet-GUI.ps1 -outputFile .\WinGet-GUI.exe `
     -STA -requireAdmin -noConsole `
     -title "Winget Update Manager" -version "1.9.1" -product "Winget GUI"
