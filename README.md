@@ -48,10 +48,11 @@ Import-Module ps2exe
 
 Invoke-ps2exe -inputFile .\WinGet-GUI.ps1 -outputFile .\WinGet-GUI.exe `
     -STA -requireAdmin -noConsole `
+    -iconFile .\WinGet-GUI.ico `
     -title "Winget Update Manager" -version "1.9.1" -product "Winget GUI"
 ```
 
-`-STA` and `-requireAdmin` bake the WPF thread and elevation requirements directly into the `.exe`'s manifest, so Windows handles both automatically before the script even runs — the script detects when it's running as a compiled `.exe` and skips its own manual relaunch logic in that case, so you won't get a double UAC prompt. `-noConsole` hides the PowerShell console window behind the GUI. The resulting `WinGet-GUI.exe` is fully standalone (winget itself still needs to be installed on the target machine, as before).
+`-STA` and `-requireAdmin` bake the WPF thread and elevation requirements directly into the `.exe`'s manifest, so Windows handles both automatically before the script even runs — the script detects when it's running as a compiled `.exe` and skips its own manual relaunch logic in that case, so you won't get a double UAC prompt. `-noConsole` hides the PowerShell console window behind the GUI. `-iconFile` gives the compiled `.exe` its own icon (`WinGet-GUI.ico`, included in this repo) — it needs a real multi-resolution `.ico` file, not a `.png`/`.jpg` directly. The resulting `WinGet-GUI.exe` is fully standalone (winget itself still needs to be installed on the target machine, as before).
 
 ## Troubleshooting
 
