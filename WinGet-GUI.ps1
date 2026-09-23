@@ -11,7 +11,7 @@
 #>
 
 # Bump this whenever you ship a change worth noting in CHANGELOG.md.
-$script:AppVersion = '1.7.2'
+$script:AppVersion = '1.8.0'
 
 # WPF needs an STA thread. Windows PowerShell defaults to STA, but PowerShell 7 (pwsh)
 # defaults to MTA, so relaunch ourselves with -STA if needed.
@@ -62,6 +62,10 @@ if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
                 <Button x:Name="BtnUpgradeAll" Content="Upgrade All" Width="120" Height="30" Margin="0,0,8,8"/>
                 <Button x:Name="BtnResetSources" Content="Reset Sources" Width="120" Height="30" Margin="0,0,8,8"/>
                 <Button x:Name="BtnDiagnose" Content="Diagnose Network" Width="130" Height="30" Margin="0,0,8,8"/>
+                <TextBox x:Name="TxtSearchQuery" Width="200" Height="26" Margin="12,0,4,8" VerticalAlignment="Center"
+                         ToolTip="Type a name (e.g. 'notepad++') then click Search"/>
+                <Button x:Name="BtnSearch" Content="Search" Width="90" Height="30" Margin="0,0,8,8"/>
+                <Button x:Name="BtnInstallSelected" Content="Install Selected" Width="130" Height="30" Margin="0,0,8,8"/>
                 <CheckBox x:Name="ChkIncludeUnknown" Content="Include unknown versions" VerticalAlignment="Center" Margin="12,0,0,8" IsChecked="True"/>
                 <CheckBox x:Name="ChkSkipStore" Content="Skip Microsoft Store (msstore) source" VerticalAlignment="Center" Margin="12,0,0,8" IsChecked="True"/>
                 <CheckBox x:Name="ChkRemoveDesktopIcons" Content="Remove new desktop icons after install/upgrade" VerticalAlignment="Center" Margin="12,0,0,8" IsChecked="True"/>
@@ -104,6 +108,9 @@ $btnUpgradeSelected = $window.FindName('BtnUpgradeSelected')
 $btnUpgradeAll      = $window.FindName('BtnUpgradeAll')
 $btnResetSources    = $window.FindName('BtnResetSources')
 $btnDiagnose        = $window.FindName('BtnDiagnose')
+$txtSearchQuery     = $window.FindName('TxtSearchQuery')
+$btnSearch          = $window.FindName('BtnSearch')
+$btnInstallSelected = $window.FindName('BtnInstallSelected')
 $btnAbout           = $window.FindName('BtnAbout')
 $btnExit            = $window.FindName('BtnExit')
 $chkIncludeUnknown  = $window.FindName('ChkIncludeUnknown')
@@ -144,6 +151,9 @@ function Set-UiBusy {
     $btnUpgradeAll.IsEnabled      = -not $Busy
     $btnResetSources.IsEnabled    = -not $Busy
     $btnDiagnose.IsEnabled        = -not $Busy
+    $btnSearch.IsEnabled          = -not $Busy
+    $btnInstallSelected.IsEnabled = -not $Busy
+    $txtSearchQuery.IsEnabled     = -not $Busy
     $dataGrid.IsEnabled           = -not $Busy
     $progress.Visibility          = if ($Busy) { 'Visible' } else { 'Collapsed' }
     $progress.IsIndeterminate     = $Busy
@@ -157,10 +167,33 @@ function Append-Log {
     $txtLog.ScrollToEnd()
 }
 
+function Get-WingetTableColumns {
+    <#
+      Figures out which of winget's known column headers are actually present in a
+      given header line, and where each one starts. Different winget commands print
+      different columns ("upgrade" has Name/Id/Version/Available/Source; "search"
+      has Name/Id/Version/Source, sometimes with an extra "Match" column in the
+      middle), so this is detected per-table rather than assumed fixed.
+    #>
+    param([string]$HeaderLine)
+
+    $candidates = @('Name', 'Id', 'Version', 'Match', 'Available', 'Source')
+    $found = @()
+    foreach ($name in $candidates) {
+        $m = [regex]::Match($HeaderLine, "\b$name\b")
+        if ($m.Success) {
+            $found += [PSCustomObject]@{ Name = $name; Start = $m.Index }
+        }
+    }
+
+    return @($found | Sort-Object Start)
+}
+
 function ConvertFrom-WingetUpgradeTable {
     <#
-      winget's "upgrade" table is column-aligned, not delimited, so we find the
-      header row and slice every following line at the same character offsets.
+      winget's tables ("upgrade", "search", etc.) are column-aligned, not delimited,
+      so we find the header row, work out which columns are actually present and
+      where each one starts, then slice every following line at those offsets.
     #>
     param([string[]]$Lines)
 
@@ -176,52 +209,41 @@ function ConvertFrom-WingetUpgradeTable {
 
     if ($headerIndex -lt 0) { return $results }
 
-    $header = $Lines[$headerIndex]
+    $header  = $Lines[$headerIndex]
+    $columns = Get-WingetTableColumns -HeaderLine $header
 
-    function Get-ColStart {
-        param([string]$Name, [int]$From)
-        $idx = $header.IndexOf($Name, $From)
-        return $idx
-    }
-
-    $nameStart      = Get-ColStart -Name 'Name' -From 0
-    $idStart        = Get-ColStart -Name 'Id' -From ($nameStart + 4)
-    $versionStart   = Get-ColStart -Name 'Version' -From ($idStart + 2)
-    $availableStart = Get-ColStart -Name 'Available' -From ($versionStart + 7)
-    $sourceStart    = Get-ColStart -Name 'Source' -From ($availableStart + 9)
-
-    if ($idStart -lt 0 -or $versionStart -lt 0 -or $availableStart -lt 0) { return $results }
+    if ($columns.Count -lt 3) { return $results }
 
     # Row after the header is the "----" separator; data starts after that.
     for ($i = $headerIndex + 2; $i -lt $Lines.Count; $i++) {
         $line = $Lines[$i]
 
         if ([string]::IsNullOrWhiteSpace($line)) { break }
-        if ($line -match '^\d+\s+upgrades? available' -or $line -match '^No installed package found') { break }
+        if ($line -match '^\d+\s+upgrades? available' -or
+            $line -match '^No installed package found' -or
+            $line -match '^No package found matching input criteria') { break }
 
         $pad = $line
         if ($pad.Length -lt $header.Length) { $pad = $pad.PadRight($header.Length) }
 
-        $name = $pad.Substring($nameStart, $idStart - $nameStart).Trim()
-        $id   = $pad.Substring($idStart, $versionStart - $idStart).Trim()
-        $ver  = $pad.Substring($versionStart, $availableStart - $versionStart).Trim()
+        $values = @{}
+        for ($c = 0; $c -lt $columns.Count; $c++) {
+            $start = $columns[$c].Start
+            $end   = if ($c -lt $columns.Count - 1) { $columns[$c + 1].Start } else { $pad.Length }
+            if ($end -lt $start) { $end = $start }
+            $values[$columns[$c].Name] = $pad.Substring($start, $end - $start).Trim()
+        }
 
-        if ($sourceStart -gt $availableStart) {
-            $avail  = $pad.Substring($availableStart, $sourceStart - $availableStart).Trim()
-            $source = $pad.Substring($sourceStart).Trim()
-        }
-        else {
-            $avail  = $pad.Substring($availableStart).Trim()
-            $source = ''
-        }
+        $name = $values['Name']
+        $id   = $values['Id']
 
         if ($name -and $id) {
             $results += [PSCustomObject]@{
                 Name      = $name
                 Id        = $id
-                Version   = $ver
-                Available = $avail
-                Source    = $source
+                Version   = $values['Version']
+                Available = if ($values.ContainsKey('Available')) { $values['Available'] } else { '' }
+                Source    = if ($values.ContainsKey('Source')) { $values['Source'] } else { '' }
             }
         }
     }
@@ -321,6 +343,20 @@ function Start-CheckForUpdates {
     # the same command directly in a normal terminal window.
     Start-WingetOperation -Arguments "upgrade $extra $src --accept-source-agreements --disable-interactivity" `
         -Mode 'check' -StatusText 'Checking for updates...'
+}
+
+function Start-SearchSoftware {
+    param([string]$Query)
+
+    if ([string]::IsNullOrWhiteSpace($Query)) {
+        [System.Windows.MessageBox]::Show("Type something to search for first, e.g. `"notepad++`".", "Winget GUI", 'OK', 'Warning') | Out-Null
+        return
+    }
+
+    $src      = Get-SourceArg
+    $escaped  = $Query.Trim()
+    Start-WingetOperation -Arguments "search `"$escaped`" $src --accept-source-agreements --disable-interactivity" `
+        -Mode 'search' -StatusText "Searching for '$escaped'..."
 }
 
 function Start-SourceUpdate {
@@ -448,6 +484,21 @@ $timer.Add_Tick({
                 Set-UiBusy -Busy $false -Status "$($rows.Count) update(s) available."
                 Append-Log "`r`n$($rows.Count) update(s) available.`r`n"
             }
+            'search' {
+                $lines = @()
+                if ($finalContent) { $lines = $finalContent -split "`r?`n" }
+                $rows = @(ConvertFrom-WingetUpgradeTable -Lines $lines)
+                $dataGrid.ItemsSource = $rows
+
+                Set-UiBusy -Busy $false -Status "$($rows.Count) result(s) for '$($txtSearchQuery.Text.Trim())'."
+                Append-Log "`r`n$($rows.Count) result(s) found. Select one and click 'Install Selected' to install it.`r`n"
+            }
+            'installOne' {
+                Append-Log "`r`nInstall finished.`r`n"
+                if ($chkRemoveDesktopIcons.IsChecked) { Start-DesktopWatch -Before $script:preShortcuts }
+                Append-Log "`r`nRefreshing list of outdated packages...`r`n"
+                Start-CheckForUpdates
+            }
             'upgradeAll' {
                 Append-Log "`r`nUpgrade All finished.`r`n"
                 if ($chkRemoveDesktopIcons.IsChecked) { Start-DesktopWatch -Before $script:preShortcuts }
@@ -500,6 +551,31 @@ $btnResetSources.Add_Click({
 })
 
 $btnDiagnose.Add_Click({ Start-NetworkDiagnostics })
+
+$btnSearch.Add_Click({ Start-SearchSoftware -Query $txtSearchQuery.Text })
+
+$txtSearchQuery.Add_KeyDown({
+    param($sender, $e)
+    if ($e.Key -eq 'Return') { Start-SearchSoftware -Query $txtSearchQuery.Text }
+})
+
+$btnInstallSelected.Add_Click({
+    $item = $dataGrid.SelectedItem
+    if (-not $item) {
+        [System.Windows.MessageBox]::Show("Select a package in the list first (use Search to find one).", "Winget GUI", 'OK', 'Warning') | Out-Null
+        return
+    }
+    $confirm = [System.Windows.MessageBox]::Show(
+        "Install '$($item.Name)' ($($item.Id)) now?",
+        "Confirm Install", 'YesNo', 'Question')
+    if ($confirm -eq 'Yes') {
+        if ($chkRemoveDesktopIcons.IsChecked) { $script:preShortcuts = Get-DesktopShortcutSnapshot }
+        $src        = Get-SourceArg
+        $escapedId  = $item.Id
+        Start-WingetOperation -Arguments "install --id `"$escapedId`" -e $src --accept-package-agreements --accept-source-agreements --disable-interactivity" `
+            -Mode 'installOne' -StatusText "Installing $($item.Name)..."
+    }
+})
 
 $btnAbout.Add_Click({
     $wingetVersion = try { (& winget --version) } catch { 'unknown' }

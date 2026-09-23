@@ -7,13 +7,14 @@ A small PowerShell + WPF front end for [winget](https://learn.microsoft.com/en-u
 ## Features
 
 - On launch, automatically runs `winget upgrade` and lists what's outdated in a sortable grid (Name, Id, Version, Available, Source).
+- **Search** — type a name and search winget's sources (`winget search`), then **Install Selected** to install whatever you pick from the results, with the same confirmation prompt and live log output as an upgrade.
 - **Upgrade All** — runs `winget upgrade --all` with a confirmation prompt, streaming live output into a log pane.
 - **Upgrade Selected** — upgrades just the highlighted package.
 - **Reset Sources** — runs `winget source reset --force` followed by `winget source update`, for when package searches start failing.
 - **Diagnose Network** — checks WinHTTP vs. WinINet proxy configuration and reachability to winget's backend hosts, for tracking down "failed to search source" errors caused by proxies or content filters.
 - Checkbox to skip the Microsoft Store (`msstore`) source, which avoids a recurring source-agreement prompt on machines where it's never been accepted interactively.
 - Checkbox to include packages with unknown/undetectable versions (`--include-unknown`).
-- Checkbox to automatically remove any new desktop icons (`.lnk`/`.url`, on either your Desktop or the shared Public Desktop) that an install/upgrade creates, so **Upgrade All**/**Upgrade Selected** don't leave a trail of shortcuts behind.
+- Checkbox to automatically remove any new desktop icons (`.lnk`/`.url`, on either your Desktop or the shared Public Desktop) that an install/upgrade creates, so **Upgrade All**/**Upgrade Selected**/**Install Selected** don't leave a trail of shortcuts behind. Keeps checking for 20 seconds after the operation finishes, since some installers create their shortcut via a background process rather than immediately.
 - About and Exit buttons.
 
 ## Requirements

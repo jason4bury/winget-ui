@@ -2,6 +2,21 @@
 
 All notable changes to this project are documented here.
 
+## [1.8.0] - 2026-09-23
+### Added
+- **Search** box + **Search** button: runs `winget search "<query>"` and lists the results in the
+  same grid used for outdated packages.
+- **Install Selected** button: installs whatever's selected in the grid (a search result, or any
+  other row) via `winget install --id <id> -e`, with the same confirmation prompt, live log
+  output, and automatic desktop-icon cleanup as the existing upgrade actions.
+- Pressing Enter in the search box now runs the search too.
+
+### Changed
+- The table parser (`ConvertFrom-WingetUpgradeTable`) now detects which columns are actually
+  present in a given winget table instead of assuming a fixed set, since `winget search` doesn't
+  always print the same columns as `winget upgrade` (it can add an extra "Match" column, and never
+  has "Available"). Upgrade parsing is unaffected.
+
 ## [1.7.2] - 2026-09-23
 ### Fixed
 - Desktop icon removal could miss shortcuts created by installers/updaters that drop
