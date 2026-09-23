@@ -34,6 +34,19 @@ powershell -ExecutionPolicy Bypass -File .\Winget-GUI.ps1
 
 No installation, no dependencies beyond winget itself.
 
+### Optional: build as a standalone .exe
+
+If you'd rather distribute a single `.exe` than a `.ps1` (e.g. for deployment via Intune), you can compile it with the free, open-source [ps2exe](https://github.com/MScholtes/PS2EXE) module. This has to be run on a real Windows PowerShell/pwsh install — it can't be produced any other way:
+
+```powershell
+Install-Module -Name ps2exe -Scope CurrentUser -Force
+Invoke-ps2exe -inputFile .\WinGet-GUI.ps1 -outputFile .\WinGet-GUI.exe `
+    -STA -requireAdmin -noConsole `
+    -title "Winget Update Manager" -version "1.9.1" -product "Winget GUI"
+```
+
+`-STA` and `-requireAdmin` bake the WPF thread and elevation requirements directly into the `.exe`'s manifest, so Windows handles both automatically before the script even runs — the script detects when it's running as a compiled `.exe` and skips its own manual relaunch logic in that case, so you won't get a double UAC prompt. `-noConsole` hides the PowerShell console window behind the GUI. The resulting `WinGet-GUI.exe` is fully standalone (winget itself still needs to be installed on the target machine, as before).
+
 ## Troubleshooting
 
 winget can fail in a few distinct ways when run from a script rather than typed directly into a terminal. This tool grew out of debugging those, so a few notes in case you hit the same things:

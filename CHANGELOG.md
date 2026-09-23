@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here.
 
+## [1.9.1] - 2026-09-23
+### Added
+- Support for compiling the script into a standalone `.exe` via the [ps2exe](https://github.com/MScholtes/PS2EXE)
+  module. The script now detects whether its host process is a compiled `.exe` rather than
+  `powershell.exe`/`pwsh.exe` and, if so, skips its own manual STA/elevation relaunch logic
+  (which assumes it's being hosted by the PowerShell console and would misfire under a
+  compiled exe), relying instead on ps2exe's own `-STA`/`-requireAdmin` build switches. See
+  README.md for the exact build command.
+
 ## [1.9.0] - 2026-09-23
 ### Added
 - The script now checks whether it's running as Administrator on launch and, if not,
