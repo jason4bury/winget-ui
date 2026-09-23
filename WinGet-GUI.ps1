@@ -11,7 +11,7 @@
 #>
 
 # Bump this whenever you ship a change worth noting in CHANGELOG.md.
-$script:AppVersion = '1.7.1'
+$script:AppVersion = '1.7.2'
 
 # WPF needs an STA thread. Windows PowerShell defaults to STA, but PowerShell 7 (pwsh)
 # defaults to MTA, so relaunch ourselves with -STA if needed.
@@ -124,9 +124,18 @@ $script:lastOutLength = 0
 $script:lastErrLength = 0
 $script:mode          = $null
 $script:preShortcuts = $null
+$script:desktopWatchBefore    = $null
+$script:desktopWatchTicksLeft = 0
 
 $timer = New-Object System.Windows.Threading.DispatcherTimer
 $timer.Interval = [TimeSpan]::FromMilliseconds(400)
+
+# Some installers/updaters (Chrome, Edge, Zoom, Adobe products, etc.) create or
+# refresh their desktop shortcut via a separate background process *after* winget's
+# own process has already exited, so a single before/after check right when winget
+# finishes can miss it. This timer keeps re-checking for a short grace period.
+$desktopWatchTimer = New-Object System.Windows.Threading.DispatcherTimer
+$desktopWatchTimer.Interval = [TimeSpan]::FromSeconds(2)
 
 function Set-UiBusy {
     param([bool]$Busy, [string]$Status)
@@ -255,6 +264,20 @@ function Remove-NewDesktopShortcuts {
     }
 }
 
+function Start-DesktopWatch {
+    param([string[]]$Before)
+
+    if (-not $Before) { return }
+
+    # Immediate check in case the shortcut was created synchronously, before we
+    # start polling for the delayed/background case.
+    Remove-NewDesktopShortcuts -Before $Before
+
+    $script:desktopWatchBefore    = $Before
+    $script:desktopWatchTicksLeft = 10   # 10 x 2s = 20s grace period
+    $desktopWatchTimer.Start()
+}
+
 function Start-WingetOperation {
     param(
         [string]$FilePath = 'winget',
@@ -364,6 +387,16 @@ Write-Output "A TCP failure or timeout on all three hosts points to a firewall b
         -LogPrefix '> Running network diagnostics...'
 }
 
+$desktopWatchTimer.Add_Tick({
+    if ($script:desktopWatchBefore) {
+        Remove-NewDesktopShortcuts -Before $script:desktopWatchBefore
+    }
+    $script:desktopWatchTicksLeft--
+    if ($script:desktopWatchTicksLeft -le 0) {
+        $desktopWatchTimer.Stop()
+    }
+})
+
 $timer.Add_Tick({
     if ($script:tempOut -and (Test-Path $script:tempOut)) {
         $content = Get-Content -Path $script:tempOut -Raw -ErrorAction SilentlyContinue
@@ -417,13 +450,13 @@ $timer.Add_Tick({
             }
             'upgradeAll' {
                 Append-Log "`r`nUpgrade All finished.`r`n"
-                if ($chkRemoveDesktopIcons.IsChecked) { Remove-NewDesktopShortcuts -Before $script:preShortcuts }
+                if ($chkRemoveDesktopIcons.IsChecked) { Start-DesktopWatch -Before $script:preShortcuts }
                 Append-Log "`r`nRefreshing list...`r`n"
                 Start-CheckForUpdates
             }
             'upgradeOne' {
                 Append-Log "`r`nUpgrade finished.`r`n"
-                if ($chkRemoveDesktopIcons.IsChecked) { Remove-NewDesktopShortcuts -Before $script:preShortcuts }
+                if ($chkRemoveDesktopIcons.IsChecked) { Start-DesktopWatch -Before $script:preShortcuts }
                 Append-Log "`r`nRefreshing list...`r`n"
                 Start-CheckForUpdates
             }
@@ -482,6 +515,7 @@ $btnAbout.Add_Click({
 })
 
 $btnExit.Add_Click({
+    $desktopWatchTimer.Stop()
     if ($script:proc -and -not $script:proc.HasExited) {
         $confirm = [System.Windows.MessageBox]::Show(
             "A winget operation is still running. Exit anyway?",

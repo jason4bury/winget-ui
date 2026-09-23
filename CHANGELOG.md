@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here.
 
+## [1.7.2] - 2026-09-23
+### Fixed
+- Desktop icon removal could miss shortcuts created by installers/updaters that drop
+  their icon via a background process after winget itself has already exited (Chrome,
+  Edge, Zoom, and similar are notorious for this). The removal check now keeps polling
+  for 20 seconds after the upgrade finishes instead of checking only once.
+
 ## [1.7.1] - 2026-09-18
 ### Added
 - The About dialog now shows the app's own version number (alongside the detected winget CLI
