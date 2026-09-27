@@ -1,12 +1,12 @@
 # Winget GUI
 
-<p align="center">
-  <img src="assets/winget-gui-logo.png" alt="Winget GUI logo" width="200">
-</p>
-
 A small PowerShell + WPF front end for [winget](https://learn.microsoft.com/en-us/windows/package-manager/winget/) (the Windows Package Manager). It gives you a checkable list of what's outdated and buttons to upgrade everything, upgrade one package at a time, and recover from the source/network issues winget occasionally runs into.
 
 ![Windows](https://img.shields.io/badge/platform-Windows-blue) ![PowerShell](https://img.shields.io/badge/PowerShell-5.1%2B%20%7C%207%2B-5391FE)
+
+<p align="center">
+  <img src="assets/winget-gui-logo.png" alt="Winget GUI logo" width="200">
+</p>
 
 ## Features
 
