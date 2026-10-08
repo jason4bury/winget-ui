@@ -18,7 +18,7 @@ A small PowerShell + WPF front end for [winget](https://learn.microsoft.com/en-u
 - **Diagnose Network** — checks WinHTTP vs. WinINet proxy configuration and reachability to winget's backend hosts, for tracking down "failed to search source" errors caused by proxies or content filters.
 - Checkbox to skip the Microsoft Store (`msstore`) source, which avoids a recurring source-agreement prompt on machines where it's never been accepted interactively.
 - Checkbox to include packages with unknown/undetectable versions (`--include-unknown`).
-- Checkbox to automatically remove any new desktop icons (`.lnk`/`.url`, on either your Desktop or the shared Public Desktop) that an install/upgrade creates, so **Upgrade All**/**Upgrade Selected**/**Install Selected** don't leave a trail of shortcuts behind. Keeps checking for 20 seconds after the operation finishes, since some installers create their shortcut via a background process rather than immediately.
+- Checkbox to automatically remove any new desktop icons (`.lnk`/`.url`, on either your Desktop or the shared Public Desktop) that an install/upgrade creates, so **Upgrade All**/**Upgrade Selected**/**Install Selected** don't leave a trail of shortcuts behind. Keeps checking for 20 seconds after the operation finishes, since some installers create their shortcut via a background process rather than immediately — and only removes a new shortcut if its name plausibly matches the package(s) just installed/upgraded, so icons you already had (including pinned ones) are left alone.
 - About and Exit buttons.
 - Relaunches itself elevated (as Administrator) automatically on launch if it isn't already, since installing/upgrading software and managing the shared Public Desktop both normally require it.
 

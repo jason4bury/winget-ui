@@ -11,7 +11,7 @@
 #>
 
 # Bump this whenever you ship a change worth noting in CHANGELOG.md.
-$script:AppVersion = '1.9.2'
+$script:AppVersion = '1.10.0'
 
 # ---------------------------------------------------------------------------
 # If this script has been compiled to a standalone .exe (e.g. with the ps2exe
@@ -171,9 +171,11 @@ $script:tempErr       = $null
 $script:lastOutLength = 0
 $script:lastErrLength = 0
 $script:mode          = $null
-$script:preShortcuts = $null
-$script:desktopWatchBefore    = $null
-$script:desktopWatchTicksLeft = 0
+$script:preShortcuts  = $null
+$script:relatedNames  = $null
+$script:desktopWatchBefore       = $null
+$script:desktopWatchRelatedNames = $null
+$script:desktopWatchTicksLeft    = 0
 
 $timer = New-Object System.Windows.Threading.DispatcherTimer
 $timer.Interval = [TimeSpan]::FromMilliseconds(400)
@@ -306,17 +308,59 @@ function Get-DesktopShortcutSnapshot {
     return @($paths)
 }
 
+function Test-ShortcutRelatesToPackage {
+    <#
+      Only treat a newly-appeared shortcut as "created by this install/upgrade" if its
+      filename plausibly matches one of the package names involved, rather than removing
+      *any* shortcut that happens to be new. Without this, an icon you (or something else)
+      added to the Desktop in the few seconds around an install/upgrade — including one
+      already pinned there — could get swept up and deleted along with the real one.
+    #>
+    param(
+        [string]$ShortcutPath,
+        [string[]]$RelatedNames
+    )
+
+    if (-not $RelatedNames -or $RelatedNames.Count -eq 0) { return $true }
+
+    $shortcutName = [System.IO.Path]::GetFileNameWithoutExtension($ShortcutPath)
+    if (-not $shortcutName) { return $true }
+
+    foreach ($name in $RelatedNames) {
+        if ([string]::IsNullOrWhiteSpace($name)) { continue }
+
+        # Direct containment either way (handles e.g. "Adobe Acrobat" vs. "Adobe Acrobat DC").
+        if ($shortcutName -like "*$name*" -or $name -like "*$shortcutName*") { return $true }
+
+        # Word-level overlap, so a longer package name like "Adobe Acrobat Reader DC (64-bit)"
+        # still matches a shortcut named just "Acrobat Reader.lnk".
+        $words = $name -split '[^a-zA-Z0-9]+' | Where-Object { $_.Length -ge 3 }
+        foreach ($w in $words) {
+            if ($shortcutName -match [regex]::Escape($w)) { return $true }
+        }
+    }
+
+    return $false
+}
+
 function Remove-NewDesktopShortcuts {
-    param([string[]]$Before)
+    param([string[]]$Before, [string[]]$RelatedNames)
 
     if (-not $Before) { return }
 
     $after = Get-DesktopShortcutSnapshot
     $new   = @($after | Where-Object { $Before -notcontains $_ })
 
-    if ($new.Count -gt 0) {
-        Append-Log "`r`nRemoving $($new.Count) new desktop icon(s) created by this install/upgrade:`r`n"
-        foreach ($p in $new) {
+    $toRemove = @($new | Where-Object { Test-ShortcutRelatesToPackage -ShortcutPath $_ -RelatedNames $RelatedNames })
+    $toSkip   = @($new | Where-Object { $_ -notin $toRemove })
+
+    foreach ($p in $toSkip) {
+        Append-Log "`r`nLeaving new desktop icon alone (doesn't look related to what was just installed/upgraded): $p`r`n"
+    }
+
+    if ($toRemove.Count -gt 0) {
+        Append-Log "`r`nRemoving $($toRemove.Count) new desktop icon(s) created by this install/upgrade:`r`n"
+        foreach ($p in $toRemove) {
             try {
                 Remove-Item -Path $p -Force -ErrorAction Stop
                 Append-Log "  Removed: $p`r`n"
@@ -350,16 +394,17 @@ function Remove-NewDesktopShortcuts {
 }
 
 function Start-DesktopWatch {
-    param([string[]]$Before)
+    param([string[]]$Before, [string[]]$RelatedNames)
 
     if (-not $Before) { return }
 
     # Immediate check in case the shortcut was created synchronously, before we
     # start polling for the delayed/background case.
-    Remove-NewDesktopShortcuts -Before $Before
+    Remove-NewDesktopShortcuts -Before $Before -RelatedNames $RelatedNames
 
-    $script:desktopWatchBefore    = $Before
-    $script:desktopWatchTicksLeft = 10   # 10 x 2s = 20s grace period
+    $script:desktopWatchBefore       = $Before
+    $script:desktopWatchRelatedNames = $RelatedNames
+    $script:desktopWatchTicksLeft    = 10   # 10 x 2s = 20s grace period
     $desktopWatchTimer.Start()
 }
 
@@ -488,7 +533,7 @@ Write-Output "A TCP failure or timeout on all three hosts points to a firewall b
 
 $desktopWatchTimer.Add_Tick({
     if ($script:desktopWatchBefore) {
-        Remove-NewDesktopShortcuts -Before $script:desktopWatchBefore
+        Remove-NewDesktopShortcuts -Before $script:desktopWatchBefore -RelatedNames $script:desktopWatchRelatedNames
     }
     $script:desktopWatchTicksLeft--
     if ($script:desktopWatchTicksLeft -le 0) {
@@ -558,19 +603,19 @@ $timer.Add_Tick({
             }
             'installOne' {
                 Append-Log "`r`nInstall finished.`r`n"
-                if ($chkRemoveDesktopIcons.IsChecked) { Start-DesktopWatch -Before $script:preShortcuts }
+                if ($chkRemoveDesktopIcons.IsChecked) { Start-DesktopWatch -Before $script:preShortcuts -RelatedNames $script:relatedNames }
                 Append-Log "`r`nRefreshing list of outdated packages...`r`n"
                 Start-CheckForUpdates
             }
             'upgradeAll' {
                 Append-Log "`r`nUpgrade All finished.`r`n"
-                if ($chkRemoveDesktopIcons.IsChecked) { Start-DesktopWatch -Before $script:preShortcuts }
+                if ($chkRemoveDesktopIcons.IsChecked) { Start-DesktopWatch -Before $script:preShortcuts -RelatedNames $script:relatedNames }
                 Append-Log "`r`nRefreshing list...`r`n"
                 Start-CheckForUpdates
             }
             'upgradeOne' {
                 Append-Log "`r`nUpgrade finished.`r`n"
-                if ($chkRemoveDesktopIcons.IsChecked) { Start-DesktopWatch -Before $script:preShortcuts }
+                if ($chkRemoveDesktopIcons.IsChecked) { Start-DesktopWatch -Before $script:preShortcuts -RelatedNames $script:relatedNames }
                 Append-Log "`r`nRefreshing list...`r`n"
                 Start-CheckForUpdates
             }
@@ -596,7 +641,12 @@ $btnUpgradeAll.Add_Click({
         "Run 'winget upgrade --all' now? This will upgrade every package winget can update.",
         "Confirm Upgrade All", 'YesNo', 'Question')
     if ($confirm -eq 'Yes') {
-        if ($chkRemoveDesktopIcons.IsChecked) { $script:preShortcuts = Get-DesktopShortcutSnapshot }
+        if ($chkRemoveDesktopIcons.IsChecked) {
+            $script:preShortcuts = Get-DesktopShortcutSnapshot
+            # Everything currently listed as outdated is what's about to be upgraded, so only
+            # shortcuts matching one of these names are candidates for removal afterwards.
+            $script:relatedNames = @($dataGrid.ItemsSource | ForEach-Object { $_.Name })
+        }
         $src = Get-SourceArg
         Start-WingetOperation -Arguments "upgrade --all $src --accept-package-agreements --accept-source-agreements --disable-interactivity" `
             -Mode 'upgradeAll' -StatusText 'Upgrading all packages...'
@@ -632,7 +682,10 @@ $btnInstallSelected.Add_Click({
         "Install '$($item.Name)' ($($item.Id)) now?",
         "Confirm Install", 'YesNo', 'Question')
     if ($confirm -eq 'Yes') {
-        if ($chkRemoveDesktopIcons.IsChecked) { $script:preShortcuts = Get-DesktopShortcutSnapshot }
+        if ($chkRemoveDesktopIcons.IsChecked) {
+            $script:preShortcuts = Get-DesktopShortcutSnapshot
+            $script:relatedNames = @($item.Name)
+        }
         $src        = Get-SourceArg
         $escapedId  = $item.Id
         Start-WingetOperation -Arguments "install --id `"$escapedId`" -e $src --accept-package-agreements --accept-source-agreements --disable-interactivity" `
@@ -676,7 +729,10 @@ $btnUpgradeSelected.Add_Click({
         "Upgrade '$($item.Name)' ($($item.Id)) now?",
         "Confirm Upgrade", 'YesNo', 'Question')
     if ($confirm -eq 'Yes') {
-        if ($chkRemoveDesktopIcons.IsChecked) { $script:preShortcuts = Get-DesktopShortcutSnapshot }
+        if ($chkRemoveDesktopIcons.IsChecked) {
+            $script:preShortcuts = Get-DesktopShortcutSnapshot
+            $script:relatedNames = @($item.Name)
+        }
         $escapedId = $item.Id
         Start-WingetOperation -Arguments "upgrade --id `"$escapedId`" -e --accept-package-agreements --accept-source-agreements --disable-interactivity" `
             -Mode 'upgradeOne' -StatusText "Upgrading $($item.Name)..."

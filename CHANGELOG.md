@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented here.
 
+## [1.10.0] - 2026-10-08
+### Fixed
+- Automatic desktop-icon removal could occasionally catch icons that had nothing to do with
+  the install/upgrade that triggered it — including one you'd already had pinned on the
+  Desktop — if it happened to appear as "new" during the before/after check or the 20-second
+  grace period. Removal is now also filtered by name: a new shortcut only gets deleted if its
+  filename plausibly matches the package(s) that were actually just installed/upgraded
+  (`Test-ShortcutRelatesToPackage`), and anything else that showed up as new is left alone and
+  logged instead of removed.
+
 ## [1.9.2] - 2026-09-23
 ### Added
 - `WinGet-GUI.ico`: a multi-resolution app icon, and a `-iconFile` example in the ps2exe build
