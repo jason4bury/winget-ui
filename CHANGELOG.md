@@ -10,6 +10,12 @@ All notable changes to this project are documented here.
   `.exe` already had no console via ps2exe's `-noConsole` switch, so this is a no-op there.
   The self-relaunches used for elevation and for switching into STA mode now also launch with
   `-WindowStyle Hidden`, so no console window flashes up even briefly during those relaunches.
+- `Build-Exe.ps1`: a build script that automates the ps2exe steps in the README (execution
+  policy workaround, installing the `ps2exe` module if needed, then compiling the exe with the
+  icon and `-STA -requireAdmin -noConsole` switches). Reads the version number straight out of
+  `$script:AppVersion`, so the exe's version metadata can't drift out of sync with the script it
+  was built from, and names the output `WinGet-GUI v<version>.exe` (e.g. `WinGet-GUI v1.11.0.exe`)
+  rather than a plain `WinGet-GUI.exe`, so multiple builds don't overwrite one another.
 
 ## [1.10.0] - 2026-10-08
 ### Fixed

@@ -41,7 +41,17 @@ No installation, no dependencies beyond winget itself.
 
 ### Optional: build as a standalone .exe
 
-If you'd rather distribute a single `.exe` than a `.ps1` (e.g. for deployment via Intune), you can compile it with the free, open-source [ps2exe](https://github.com/MScholtes/PS2EXE) module. This has to be run on a real Windows PowerShell/pwsh install — it can't be produced any other way:
+If you'd rather distribute a single `.exe` than a `.ps1` (e.g. for deployment via Intune), you can compile it with the free, open-source [ps2exe](https://github.com/MScholtes/PS2EXE) module. This has to be run on a real Windows PowerShell/pwsh install — it can't be produced any other way.
+
+Run `Build-Exe.ps1` (included in this repo) from the same folder as `WinGet-GUI.ps1` and `WinGet-GUI.ico`:
+
+```powershell
+.\Build-Exe.ps1
+```
+
+It takes care of the execution-policy workaround, installs the `ps2exe` module the first time it's needed, and compiles the exe with the icon and `-STA -requireAdmin -noConsole` switches below — naming the output `WinGet-GUI v<version>.exe` (e.g. `WinGet-GUI v1.11.0.exe`) and reading `<version>` straight out of `$script:AppVersion`, so the exe's filename and version metadata can't go stale. Use `-ScriptPath`, `-IconPath` or `-OutputPath` if you want to point it somewhere else or name it something else.
+
+If you'd rather run the ps2exe steps yourself instead, that's exactly what `Build-Exe.ps1` automates:
 
 ```powershell
 # -Scope Process only affects this one console window, not the machine-wide policy — needed
@@ -51,10 +61,10 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 Install-Module -Name ps2exe -Scope CurrentUser -Force
 Import-Module ps2exe
 
-Invoke-ps2exe -inputFile .\WinGet-GUI.ps1 -outputFile .\WinGet-GUI.exe `
+Invoke-ps2exe -inputFile .\WinGet-GUI.ps1 -outputFile ".\WinGet-GUI v1.11.0.exe" `
     -STA -requireAdmin -noConsole `
     -iconFile .\WinGet-GUI.ico `
-    -title "Winget Update Manager" -version "1.9.2" -product "Winget GUI"
+    -title "Winget Update Manager" -version "1.11.0" -product "Winget GUI"
 ```
 
 `-STA` and `-requireAdmin` bake the WPF thread and elevation requirements directly into the `.exe`'s manifest, so Windows handles both automatically before the script even runs — the script detects when it's running as a compiled `.exe` and skips its own manual relaunch logic in that case, so you won't get a double UAC prompt. `-noConsole` hides the PowerShell console window behind the GUI. `-iconFile` gives the compiled `.exe` its own icon (`WinGet-GUI.ico`, included in this repo) — it needs a real multi-resolution `.ico` file, not a `.png`/`.jpg` directly. The resulting `WinGet-GUI.exe` is fully standalone (winget itself still needs to be installed on the target machine, as before).
