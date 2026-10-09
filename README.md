@@ -21,6 +21,7 @@ A small PowerShell + WPF front end for [winget](https://learn.microsoft.com/en-u
 - Checkbox to automatically remove any new desktop icons (`.lnk`/`.url`, on either your Desktop or the shared Public Desktop) that an install/upgrade creates, so **Upgrade All**/**Upgrade Selected**/**Install Selected** don't leave a trail of shortcuts behind. Keeps checking for 20 seconds after the operation finishes, since some installers create their shortcut via a background process rather than immediately — and only removes a new shortcut if its name plausibly matches the package(s) just installed/upgraded, so icons you already had (including pinned ones) are left alone.
 - About and Exit buttons.
 - Relaunches itself elevated (as Administrator) automatically on launch if it isn't already, since installing/upgrading software and managing the shared Public Desktop both normally require it.
+- Hides its own PowerShell console window on launch, so only the GUI window is shown (the compiled `.exe` already has no console via ps2exe's `-noConsole` switch).
 
 ## Requirements
 

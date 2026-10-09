@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here.
 
+## [1.11.0] - 2026-10-09
+### Added
+- The script now hides its own PowerShell console window on launch (via a `GetConsoleWindow`/
+  `ShowWindow` Win32 call), so only the GUI is visible when running `WinGet-GUI.ps1` directly —
+  double-clicked, run from a shortcut, or launched from an existing terminal. The compiled
+  `.exe` already had no console via ps2exe's `-noConsole` switch, so this is a no-op there.
+  The self-relaunches used for elevation and for switching into STA mode now also launch with
+  `-WindowStyle Hidden`, so no console window flashes up even briefly during those relaunches.
+
 ## [1.10.0] - 2026-10-08
 ### Fixed
 - Automatic desktop-icon removal could occasionally catch icons that had nothing to do with

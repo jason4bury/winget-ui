@@ -11,7 +11,31 @@
 #>
 
 # Bump this whenever you ship a change worth noting in CHANGELOG.md.
-$script:AppVersion = '1.10.0'
+$script:AppVersion = '1.11.0'
+
+# ---------------------------------------------------------------------------
+# Hide the PowerShell console window this script is running in, if any, so
+# only the GUI shows. The compiled .exe (see README) already has no console
+# via ps2exe's -noConsole switch, so this is a no-op there; it's for running
+# the .ps1 directly (double-click, a shortcut, or an existing terminal),
+# where a console window would otherwise sit behind/alongside the GUI. Done
+# as early as possible to minimise any visible flash before it takes effect.
+# ---------------------------------------------------------------------------
+try {
+    Add-Type -Name Window -Namespace Win32Console -MemberDefinition @'
+        [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+        public static extern System.IntPtr GetConsoleWindow();
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        public static extern bool ShowWindow(System.IntPtr hWnd, int nCmdShow);
+'@ -ErrorAction Stop
+
+    $consoleHandle = [Win32Console.Window]::GetConsoleWindow()
+    if ($consoleHandle -ne [IntPtr]::Zero) {
+        [Win32Console.Window]::ShowWindow($consoleHandle, 0) | Out-Null   # 0 = SW_HIDE
+    }
+} catch {
+    # Not fatal if this fails for any reason — worst case the console stays visible.
+}
 
 # ---------------------------------------------------------------------------
 # If this script has been compiled to a standalone .exe (e.g. with the ps2exe
@@ -38,7 +62,7 @@ if (-not $isCompiledExe) {
         try {
             # -STA is included here too so an elevated relaunch satisfies both requirements
             # (admin rights and a WPF-compatible thread) in a single relaunch.
-            Start-Process -FilePath $exe -ArgumentList @('-NoProfile', '-STA', '-File', "`"$PSCommandPath`"") -Verb RunAs | Out-Null
+            Start-Process -FilePath $exe -ArgumentList @('-NoProfile', '-STA', '-File', "`"$PSCommandPath`"") -Verb RunAs -WindowStyle Hidden | Out-Null
         } catch {
             # Most likely the UAC prompt was cancelled, or this account can't elevate at all.
             Add-Type -AssemblyName System.Windows.Forms
@@ -57,7 +81,7 @@ if (-not $isCompiledExe) {
     # elevated pwsh session directly.)
     if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA') {
         $exe = (Get-Process -Id $PID).Path
-        Start-Process -FilePath $exe -ArgumentList @('-NoProfile', '-STA', '-File', "`"$PSCommandPath`"")
+        Start-Process -FilePath $exe -ArgumentList @('-NoProfile', '-STA', '-File', "`"$PSCommandPath`"") -WindowStyle Hidden
         exit
     }
 }
