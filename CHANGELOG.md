@@ -2,6 +2,67 @@
 
 All notable changes to this project are documented here.
 
+## [1.13.0] - 2026-10-30
+### Added
+- **Installed Apps** view (`winget list`), including apps that didn't come from winget, with
+  **Uninstall Selected**.
+- **Exclude Selected**, **Excluded Apps** and **Remove Exclusion**: keep chosen apps out of
+  Upgrade All. Exclusions are winget pins, so they also apply to `winget upgrade --all` run by
+  hand and to the new `-UpgradeAll` mode. Excluded apps can still be upgraded one at a time.
+- **Cancel** button: stops the running operation, including the installer winget launched
+  (the whole process tree is ended), and skips anything still queued. The summary marks those
+  packages as cancelled or skipped.
+- **Export List** / **Import List** (`winget export` / `winget import`) for copying a set of
+  apps from one PC to another.
+- **Filter** box to narrow the current list by name or Id.
+- **Details pane** (`winget show`): publisher, description, licence and links for the selected
+  package, with Homepage and Release Notes buttons. Opens on double-click too.
+- **Save Log** button.
+- Remembers the checkbox settings and window size/position between runs
+  (`%APPDATA%\WingetUpdateManager\settings.json`).
+- **Unattended mode**: `-UpgradeAll` upgrades everything with no window, logs to
+  `%ProgramData%\WingetUpdateManager\Logs` (or `-LogPath`) and exits with winget's exit code,
+  for Task Scheduler or Intune. Also `-Silent`, `-SkipUnknown`, `-IncludeStore` and
+  `-KeepDesktopIcons`. Works as SYSTEM: winget is found in the App Installer package folder
+  when it isn't on the PATH.
+- The log pane and Details pane can be resized by dragging the splitters.
+
+### Changed
+- Toolbar reorganised into two rows, with the current view and its item count shown above the
+  list.
+- Relaunching (for elevation or STA mode) now passes along any command-line switches, and adds
+  `-ExecutionPolicy Bypass` for the relaunched process.
+- Long package Ids that winget truncated with "..." in its table are now matched by prefix
+  instead of failing an exact match.
+
+- `Build-Exe.ps1` replaced by `Build-Exe.cmd`: double-click to build the app exe plus
+  `Build-Exe.exe`, a builder exe that rebuilds the app exe with a double-click. No PowerShell
+  window or admin rights needed. It sets the execution policy for the build only, installs
+  ps2exe if it's missing (enabling TLS 1.2 and installing the NuGet provider first, so it works
+  unattended on a fresh PC), and saves its output to `Build-Exe.log`.
+- `*.exe` added to `.gitignore`: attach builds to GitHub releases instead of committing them.
+
+### Fixed
+- "Leaving new desktop icon alone" was logged every two seconds during the 20-second
+  desktop-icon check. It's now logged once per icon.
+- The `Source` value for excluded apps no longer picks up the "Pin type" column.
+
+## [1.12.1] - 2026-10-30
+### Changed
+- New, friendlier artwork: a cheerful cardboard-box mascot with an upgrade arrow replaces the
+  old glossy logo (which also used the Windows logo, a Microsoft trademark). Updated
+  `WinGet-GUI.ico` (16-256px, with simplified small sizes so it stays readable in the taskbar),
+  `WinGet-GUI.png` (now 256px, down from 1.3 MB) and `assets/winget-gui-logo.png`.
+- README title now uses the app's name, "Winget Update Manager", consistently.
+
+### Added
+- The window and taskbar now show the app's own icon instead of the default one. The script
+  loads `WinGet-GUI.ico` from its own folder; the compiled `.exe` falls back to the icon ps2exe
+  embedded in it.
+- `assets/social-preview.png`: a 1280x640 banner for GitHub's Social preview setting, so links
+  to the repo get a proper card in Teams, Slack, etc.
+- `assets/icon.svg`: the icon as an editable vector file.
+
 ## [1.12.0] - 2026-10-30
 ### Added
 - Multi-select in the package list (Ctrl+click / Shift+click). **Install Selected** and

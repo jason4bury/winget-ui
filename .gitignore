@@ -7,3 +7,6 @@ desktop.ini
 # Editor
 .vscode/
 *.swp
+
+# Build output - attach compiled exes to GitHub releases instead
+*.exe
