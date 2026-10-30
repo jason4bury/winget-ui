@@ -3,15 +3,20 @@
     A simple WPF front end for winget.
 
     On launch it runs "winget upgrade" to list what's outdated, then lets you
-    upgrade everything ("winget upgrade --all") or just the selected package,
-    with live output in the log pane.
+    upgrade everything ("winget upgrade --all") or one or more selected
+    packages, search for new software and install one or more results, with
+    live output in the log pane.
+
+    Tip: Ctrl+click or Shift+click in the list to select several packages,
+    then use Upgrade Selected / Install Selected to process them one after
+    another.
 
     Run it by double-clicking, or from a terminal:
         powershell -ExecutionPolicy Bypass -File .\Winget-GUI.ps1
 #>
 
 # Bump this whenever you ship a change worth noting in CHANGELOG.md.
-$script:AppVersion = '1.11.0'
+$script:AppVersion = '1.12.0'
 
 # ---------------------------------------------------------------------------
 # Hide the PowerShell console window this script is running in, if any, so
@@ -34,7 +39,7 @@ try {
         [Win32Console.Window]::ShowWindow($consoleHandle, 0) | Out-Null   # 0 = SW_HIDE
     }
 } catch {
-    # Not fatal if this fails for any reason — worst case the console stays visible.
+    # Not fatal if this fails for any reason - worst case the console stays visible.
 }
 
 # ---------------------------------------------------------------------------
@@ -123,14 +128,16 @@ if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
 
             <WrapPanel Grid.Column="0" Orientation="Horizontal">
                 <Button x:Name="BtnCheck" Content="Check for Updates" Width="150" Height="30" Margin="0,0,8,8"/>
-                <Button x:Name="BtnUpgradeSelected" Content="Upgrade Selected" Width="140" Height="30" Margin="0,0,8,8"/>
+                <Button x:Name="BtnUpgradeSelected" Content="Upgrade Selected" Width="160" Height="30" Margin="0,0,8,8"
+                        ToolTip="Upgrade the selected package(s). Ctrl+click or Shift+click to select several."/>
                 <Button x:Name="BtnUpgradeAll" Content="Upgrade All" Width="120" Height="30" Margin="0,0,8,8"/>
                 <Button x:Name="BtnResetSources" Content="Reset Sources" Width="120" Height="30" Margin="0,0,8,8"/>
                 <Button x:Name="BtnDiagnose" Content="Diagnose Network" Width="130" Height="30" Margin="0,0,8,8"/>
                 <TextBox x:Name="TxtSearchQuery" Width="200" Height="26" Margin="12,0,4,8" VerticalAlignment="Center"
                          ToolTip="Type a name (e.g. 'notepad++') then click Search"/>
                 <Button x:Name="BtnSearch" Content="Search" Width="90" Height="30" Margin="0,0,8,8"/>
-                <Button x:Name="BtnInstallSelected" Content="Install Selected" Width="130" Height="30" Margin="0,0,8,8"/>
+                <Button x:Name="BtnInstallSelected" Content="Install Selected" Width="150" Height="30" Margin="0,0,8,8"
+                        ToolTip="Install the selected search result(s). Ctrl+click or Shift+click to select several."/>
                 <CheckBox x:Name="ChkIncludeUnknown" Content="Include unknown versions" VerticalAlignment="Center" Margin="12,0,0,8" IsChecked="True"/>
                 <CheckBox x:Name="ChkSkipStore" Content="Skip Microsoft Store (msstore) source" VerticalAlignment="Center" Margin="12,0,0,8" IsChecked="True"/>
                 <CheckBox x:Name="ChkRemoveDesktopIcons" Content="Remove new desktop icons after install/upgrade" VerticalAlignment="Center" Margin="12,0,0,8" IsChecked="True"/>
@@ -143,8 +150,9 @@ if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
         </Grid>
 
         <DataGrid x:Name="Grid1" Grid.Row="1" AutoGenerateColumns="False" IsReadOnly="True"
-                  SelectionMode="Single" SelectionUnit="FullRow" AlternatingRowBackground="#F3F3F3"
-                  CanUserAddRows="False" CanUserDeleteRows="False" GridLinesVisibility="Horizontal">
+                  SelectionMode="Extended" SelectionUnit="FullRow" AlternatingRowBackground="#F3F3F3"
+                  CanUserAddRows="False" CanUserDeleteRows="False" GridLinesVisibility="Horizontal"
+                  ToolTip="Ctrl+click or Shift+click to select several packages">
             <DataGrid.Columns>
                 <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*"/>
                 <DataGridTextColumn Header="Id" Binding="{Binding Id}" Width="2*"/>
@@ -195,11 +203,26 @@ $script:tempErr       = $null
 $script:lastOutLength = 0
 $script:lastErrLength = 0
 $script:mode          = $null
+$script:busy          = $false
 $script:preShortcuts  = $null
 $script:relatedNames  = $null
 $script:desktopWatchBefore       = $null
 $script:desktopWatchRelatedNames = $null
 $script:desktopWatchTicksLeft    = 0
+
+# What the grid is currently showing: 'updates' (installed packages with an
+# upgrade available) or 'search' (search results, which may not be installed).
+# Upgrade Selected only makes sense for the former, Install Selected for the latter.
+$script:gridMode = 'updates'
+
+# Multi-package queue for Install Selected / Upgrade Selected. Packages are
+# processed one at a time (one winget process each) so every package gets its
+# own clearly separated log section and its own exit code in the summary.
+$script:queue            = New-Object System.Collections.Generic.List[object]
+$script:queueAction      = $null    # 'install' or 'upgrade'
+$script:queueTotal       = 0
+$script:queueResults     = New-Object System.Collections.Generic.List[object]
+$script:currentQueueItem = $null
 
 $timer = New-Object System.Windows.Threading.DispatcherTimer
 $timer.Interval = [TimeSpan]::FromMilliseconds(400)
@@ -211,19 +234,30 @@ $timer.Interval = [TimeSpan]::FromMilliseconds(400)
 $desktopWatchTimer = New-Object System.Windows.Threading.DispatcherTimer
 $desktopWatchTimer.Interval = [TimeSpan]::FromSeconds(2)
 
+function Update-ActionButtons {
+    # Shows how many packages are selected on the two "Selected" buttons, and only
+    # enables the one that fits what the grid is showing right now.
+    $count  = $dataGrid.SelectedItems.Count
+    $suffix = if ($count -gt 1) { " ($count)" } else { '' }
+    $btnUpgradeSelected.Content   = "Upgrade Selected$suffix"
+    $btnInstallSelected.Content   = "Install Selected$suffix"
+    $btnUpgradeSelected.IsEnabled = (-not $script:busy) -and ($script:gridMode -eq 'updates')
+    $btnInstallSelected.IsEnabled = (-not $script:busy) -and ($script:gridMode -eq 'search')
+}
+
 function Set-UiBusy {
     param([bool]$Busy, [string]$Status)
+    $script:busy                  = $Busy
     $btnCheck.IsEnabled           = -not $Busy
-    $btnUpgradeSelected.IsEnabled = -not $Busy
     $btnUpgradeAll.IsEnabled      = -not $Busy
     $btnResetSources.IsEnabled    = -not $Busy
     $btnDiagnose.IsEnabled        = -not $Busy
     $btnSearch.IsEnabled          = -not $Busy
-    $btnInstallSelected.IsEnabled = -not $Busy
     $txtSearchQuery.IsEnabled     = -not $Busy
     $dataGrid.IsEnabled           = -not $Busy
     $progress.Visibility          = if ($Busy) { 'Visible' } else { 'Collapsed' }
     $progress.IsIndeterminate     = $Busy
+    Update-ActionButtons
     if ($Status) { $txtStatus.Text = $Status }
 }
 
@@ -232,6 +266,16 @@ function Append-Log {
     if ([string]::IsNullOrEmpty($Text)) { return }
     $txtLog.AppendText($Text)
     $txtLog.ScrollToEnd()
+}
+
+function Read-OutputFile {
+    # winget writes UTF-8 when its output is redirected. Windows PowerShell 5.1's
+    # Get-Content assumes the system ANSI code page unless told otherwise, which
+    # mangles winget's truncation character and any non-ASCII package names (and
+    # can then throw the column slicing off), so always read as UTF-8.
+    param([string]$Path)
+    if (-not $Path -or -not (Test-Path $Path)) { return $null }
+    return Get-Content -Path $Path -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
 }
 
 function Get-WingetTableColumns {
@@ -337,8 +381,8 @@ function Test-ShortcutRelatesToPackage {
       Only treat a newly-appeared shortcut as "created by this install/upgrade" if its
       filename plausibly matches one of the package names involved, rather than removing
       *any* shortcut that happens to be new. Without this, an icon you (or something else)
-      added to the Desktop in the few seconds around an install/upgrade — including one
-      already pinned there — could get swept up and deleted along with the real one.
+      added to the Desktop in the few seconds around an install/upgrade - including one
+      already pinned there - could get swept up and deleted along with the real one.
     #>
     param(
         [string]$ShortcutPath,
@@ -385,33 +429,14 @@ function Remove-NewDesktopShortcuts {
     if ($toRemove.Count -gt 0) {
         Append-Log "`r`nRemoving $($toRemove.Count) new desktop icon(s) created by this install/upgrade:`r`n"
         foreach ($p in $toRemove) {
+            # The app always runs elevated (see the relaunch logic at the top, or ps2exe's
+            # -requireAdmin for the .exe), so a failure here is a genuine problem such as the
+            # file being locked, not a missing-rights issue that a second elevation would fix.
             try {
-                Remove-Item -Path $p -Force -ErrorAction Stop
+                Remove-Item -LiteralPath $p -Force -ErrorAction Stop
                 Append-Log "  Removed: $p`r`n"
             } catch {
-                # Some installers (e.g. Adobe Acrobat) self-elevate via their own UAC prompt to write
-                # to the shared Public Desktop, even when this script itself is not running elevated.
-                # That leaves the icon owned/locked in a way our own (non-elevated) process can't
-                # delete, so on "access denied" specifically, retry the delete via a one-off elevated
-                # process instead of just giving up.
-                if ($_.Exception -is [System.UnauthorizedAccessException] -or $_.Exception.Message -match 'is denied') {
-                    Append-Log "  Access denied removing $p directly; requesting elevation to remove it...`r`n"
-                    try {
-                        $escapedPath = $p.Replace("'", "''")
-                        $elevArgs = "-NoProfile -WindowStyle Hidden -Command `"Remove-Item -LiteralPath '$escapedPath' -Force -ErrorAction Stop`""
-                        Start-Process -FilePath 'powershell.exe' -ArgumentList $elevArgs -Verb RunAs -WindowStyle Hidden -Wait -ErrorAction Stop
-
-                        if (Test-Path -LiteralPath $p) {
-                            Append-Log "  Still present after elevated attempt: $p`r`n"
-                        } else {
-                            Append-Log "  Removed (elevated): $p`r`n"
-                        }
-                    } catch {
-                        Append-Log "  Elevation request failed or was declined for ${p}: $($_.Exception.Message)`r`n"
-                    }
-                } else {
-                    Append-Log "  Could not remove ${p}: $($_.Exception.Message)`r`n"
-                }
+                Append-Log "  Could not remove ${p}: $($_.Exception.Message)`r`n"
             }
         }
     }
@@ -438,7 +463,11 @@ function Start-WingetOperation {
         [string]$Arguments,
         [string]$Mode,
         [string]$StatusText,
-        [string]$LogPrefix
+        [string]$LogPrefix,
+        # Follow-on operations (the list refresh after an upgrade, each package in a
+        # multi-package queue, etc.) keep the existing log instead of wiping it, so the
+        # output of what just ran - and any desktop icon cleanup - is still visible.
+        [switch]$KeepLog
     )
 
     $script:mode          = $Mode
@@ -447,7 +476,7 @@ function Start-WingetOperation {
     $script:lastOutLength = 0
     $script:lastErrLength = 0
 
-    $txtLog.Clear()
+    if (-not $KeepLog) { $txtLog.Clear() }
     if ($LogPrefix) { Append-Log "$LogPrefix`r`n`r`n" } else { Append-Log "> winget $Arguments`r`n`r`n" }
     Set-UiBusy -Busy $true -Status $StatusText
 
@@ -455,6 +484,11 @@ function Start-WingetOperation {
         -NoNewWindow -PassThru `
         -RedirectStandardOutput $script:tempOut `
         -RedirectStandardError $script:tempErr
+
+    # Touching .Handle straight away makes .NET keep the process handle open, which is
+    # what lets ExitCode be read after the process has exited. Without it, ExitCode on a
+    # Start-Process -PassThru object often comes back empty.
+    $null = $script:proc.Handle
 
     $timer.Start()
 }
@@ -467,6 +501,7 @@ function Get-SourceArg {
 }
 
 function Start-CheckForUpdates {
+    param([switch]$KeepLog)
     $extra = if ($chkIncludeUnknown.IsChecked) { '--include-unknown' } else { '' }
     $src   = Get-SourceArg
     # --disable-interactivity turns off winget's console-only behaviour (progress bars,
@@ -474,7 +509,7 @@ function Start-CheckForUpdates {
     # so the log pane can show it) can misbehave in ways that don't show up when you run
     # the same command directly in a normal terminal window.
     Start-WingetOperation -Arguments "upgrade $extra $src --accept-source-agreements --disable-interactivity" `
-        -Mode 'check' -StatusText 'Checking for updates...'
+        -Mode 'check' -StatusText 'Checking for updates...' -KeepLog:$KeepLog
 }
 
 function Start-SearchSoftware {
@@ -492,11 +527,12 @@ function Start-SearchSoftware {
 }
 
 function Start-SourceUpdate {
+    param([switch]$KeepLog)
     # --verbose-logs makes winget write extra diagnostic detail to its log file
     # (%LOCALAPPDATA%\Packages\Microsoft.DesktopAppInstaller_8wekyb3d8bbwe\LocalState\DiagOutputDir)
     # in case the console output here isn't enough to see why a source failed.
     Start-WingetOperation -Arguments 'source update --verbose-logs --disable-interactivity' `
-        -Mode 'sourceUpdate' -StatusText 'Updating winget sources...'
+        -Mode 'sourceUpdate' -StatusText 'Updating winget sources...' -KeepLog:$KeepLog
 }
 
 function Start-NetworkDiagnostics {
@@ -555,6 +591,97 @@ Write-Output "A TCP failure or timeout on all three hosts points to a firewall b
         -LogPrefix '> Running network diagnostics...'
 }
 
+# ---------------------------------------------------------------------------
+# Multi-package queue (Install Selected / Upgrade Selected)
+# ---------------------------------------------------------------------------
+function Format-PackageList {
+    param([object[]]$Items, [int]$Max = 15)
+    $lines = @($Items | Select-Object -First $Max | ForEach-Object { "  - $($_.Name) ($($_.Id))" })
+    if ($Items.Count -gt $Max) { $lines += "  ...and $($Items.Count - $Max) more" }
+    return ($lines -join "`r`n")
+}
+
+function Start-PackageQueue {
+    param([object[]]$Items, [ValidateSet('install', 'upgrade')][string]$Action)
+
+    $script:queue.Clear()
+    foreach ($i in $Items) { $script:queue.Add($i) }
+    $script:queueAction  = $Action
+    $script:queueTotal   = $Items.Count
+    $script:queueResults.Clear()
+
+    if ($chkRemoveDesktopIcons.IsChecked) {
+        # One snapshot for the whole batch, so icons from any package in it get caught,
+        # matched against every selected package's name.
+        $script:preShortcuts = Get-DesktopShortcutSnapshot
+        $script:relatedNames = @($Items | ForEach-Object { $_.Name })
+    } else {
+        $script:preShortcuts = $null
+        $script:relatedNames = $null
+    }
+
+    $txtLog.Clear()
+    Start-NextQueuedPackage
+}
+
+function Start-NextQueuedPackage {
+    if ($script:queue.Count -eq 0) {
+        Complete-PackageQueue
+        return
+    }
+
+    $item = $script:queue[0]
+    $script:queue.RemoveAt(0)
+    $script:currentQueueItem = $item
+
+    $position = $script:queueTotal - $script:queue.Count
+    $src      = Get-SourceArg
+    $id       = $item.Id
+
+    if ($script:queueAction -eq 'install') {
+        $verb = 'Installing'
+        $wingetArgs = "install --id `"$id`" -e $src --accept-package-agreements --accept-source-agreements --disable-interactivity"
+    } else {
+        $verb = 'Upgrading'
+        $wingetArgs = "upgrade --id `"$id`" -e $src --accept-package-agreements --accept-source-agreements --disable-interactivity"
+    }
+
+    $counter = if ($script:queueTotal -gt 1) { " ($position of $($script:queueTotal))" } else { '' }
+    $prefix  = "===== $verb$counter : $($item.Name) =====`r`n> winget $wingetArgs"
+    if ($position -gt 1) { $prefix = "`r`n$prefix" }
+
+    Start-WingetOperation -Arguments $wingetArgs -Mode 'queue' -KeepLog `
+        -StatusText "$verb$counter $($item.Name)..." -LogPrefix $prefix
+}
+
+function Complete-PackageQueue {
+    $verb = if ($script:queueAction -eq 'install') { 'Install' } else { 'Upgrade' }
+    $okCount = @($script:queueResults | Where-Object { $_.ExitCode -eq 0 }).Count
+
+    Append-Log "`r`n===== $verb summary: $okCount of $($script:queueResults.Count) succeeded =====`r`n"
+    foreach ($r in $script:queueResults) {
+        if ($r.ExitCode -eq 0) {
+            Append-Log "  OK     $($r.Name) ($($r.Id))`r`n"
+        } elseif ($null -eq $r.ExitCode) {
+            Append-Log "  CHECK  $($r.Name) ($($r.Id)) - exit code unavailable, see the log above`r`n"
+        } else {
+            $hex = '0x{0:X8}' -f [int]$r.ExitCode
+            Append-Log "  CHECK  $($r.Name) ($($r.Id)) - exit code $hex, see the log above`r`n"
+        }
+    }
+
+    if ($chkRemoveDesktopIcons.IsChecked) {
+        Start-DesktopWatch -Before $script:preShortcuts -RelatedNames $script:relatedNames
+    }
+
+    Append-Log "`r`nRefreshing list of outdated packages...`r`n"
+    Start-CheckForUpdates -KeepLog
+}
+
+function Get-SelectedPackages {
+    return @($dataGrid.SelectedItems | ForEach-Object { $_ })
+}
+
 $desktopWatchTimer.Add_Tick({
     if ($script:desktopWatchBefore) {
         Remove-NewDesktopShortcuts -Before $script:desktopWatchBefore -RelatedNames $script:desktopWatchRelatedNames
@@ -566,37 +693,28 @@ $desktopWatchTimer.Add_Tick({
 })
 
 $timer.Add_Tick({
-    if ($script:tempOut -and (Test-Path $script:tempOut)) {
-        $content = Get-Content -Path $script:tempOut -Raw -ErrorAction SilentlyContinue
-        if ($content -and $content.Length -gt $script:lastOutLength) {
-            Append-Log $content.Substring($script:lastOutLength)
-            $script:lastOutLength = $content.Length
-        }
+    $content = Read-OutputFile -Path $script:tempOut
+    if ($content -and $content.Length -gt $script:lastOutLength) {
+        Append-Log $content.Substring($script:lastOutLength)
+        $script:lastOutLength = $content.Length
     }
-    if ($script:tempErr -and (Test-Path $script:tempErr)) {
-        $content = Get-Content -Path $script:tempErr -Raw -ErrorAction SilentlyContinue
-        if ($content -and $content.Length -gt $script:lastErrLength) {
-            Append-Log $content.Substring($script:lastErrLength)
-            $script:lastErrLength = $content.Length
-        }
+    $content = Read-OutputFile -Path $script:tempErr
+    if ($content -and $content.Length -gt $script:lastErrLength) {
+        Append-Log $content.Substring($script:lastErrLength)
+        $script:lastErrLength = $content.Length
     }
 
     if ($script:proc -and $script:proc.HasExited) {
         $timer.Stop()
 
         # One last read in case output landed between the final tick and exit.
-        $finalContent = ''
-        if (Test-Path $script:tempOut) {
-            $finalContent = Get-Content -Path $script:tempOut -Raw -ErrorAction SilentlyContinue
-            if ($finalContent -and $finalContent.Length -gt $script:lastOutLength) {
-                Append-Log $finalContent.Substring($script:lastOutLength)
-            }
+        $finalContent = Read-OutputFile -Path $script:tempOut
+        if ($finalContent -and $finalContent.Length -gt $script:lastOutLength) {
+            Append-Log $finalContent.Substring($script:lastOutLength)
         }
-        if (Test-Path $script:tempErr) {
-            $errContent = Get-Content -Path $script:tempErr -Raw -ErrorAction SilentlyContinue
-            if ($errContent -and $errContent.Length -gt $script:lastErrLength) {
-                Append-Log $errContent.Substring($script:lastErrLength)
-            }
+        $errContent = Read-OutputFile -Path $script:tempErr
+        if ($errContent -and $errContent.Length -gt $script:lastErrLength) {
+            Append-Log $errContent.Substring($script:lastErrLength)
         }
 
         Remove-Item -Path $script:tempOut, $script:tempErr -ErrorAction SilentlyContinue
@@ -606,11 +724,12 @@ $timer.Add_Tick({
                 $lines = @()
                 if ($finalContent) { $lines = $finalContent -split "`r?`n" }
                 # @() guards against PowerShell unwrapping a single-item result into a bare
-                # object instead of a one-element array — DataGrid.ItemsSource requires an
+                # object instead of a one-element array - DataGrid.ItemsSource requires an
                 # IEnumerable and throws ("Cannot convert ... to System.Collections.IEnumerable")
                 # if handed a lone PSCustomObject, which happens whenever exactly one upgrade
                 # is found.
                 $rows = @(ConvertFrom-WingetUpgradeTable -Lines $lines)
+                $script:gridMode = 'updates'
                 $dataGrid.ItemsSource = $rows
 
                 Set-UiBusy -Busy $false -Status "$($rows.Count) update(s) available."
@@ -620,36 +739,35 @@ $timer.Add_Tick({
                 $lines = @()
                 if ($finalContent) { $lines = $finalContent -split "`r?`n" }
                 $rows = @(ConvertFrom-WingetUpgradeTable -Lines $lines)
+                $script:gridMode = 'search'
                 $dataGrid.ItemsSource = $rows
 
                 Set-UiBusy -Busy $false -Status "$($rows.Count) result(s) for '$($txtSearchQuery.Text.Trim())'."
-                Append-Log "`r`n$($rows.Count) result(s) found. Select one and click 'Install Selected' to install it.`r`n"
+                Append-Log "`r`n$($rows.Count) result(s) found. Select one or more (Ctrl+click / Shift+click) and click 'Install Selected' to install them.`r`n"
             }
-            'installOne' {
-                Append-Log "`r`nInstall finished.`r`n"
-                if ($chkRemoveDesktopIcons.IsChecked) { Start-DesktopWatch -Before $script:preShortcuts -RelatedNames $script:relatedNames }
-                Append-Log "`r`nRefreshing list of outdated packages...`r`n"
-                Start-CheckForUpdates
+            'queue' {
+                $code = $null
+                try { $code = $script:proc.ExitCode } catch { }
+                $script:queueResults.Add([PSCustomObject]@{
+                    Name     = $script:currentQueueItem.Name
+                    Id       = $script:currentQueueItem.Id
+                    ExitCode = $code
+                })
+                Start-NextQueuedPackage
             }
             'upgradeAll' {
                 Append-Log "`r`nUpgrade All finished.`r`n"
                 if ($chkRemoveDesktopIcons.IsChecked) { Start-DesktopWatch -Before $script:preShortcuts -RelatedNames $script:relatedNames }
                 Append-Log "`r`nRefreshing list...`r`n"
-                Start-CheckForUpdates
-            }
-            'upgradeOne' {
-                Append-Log "`r`nUpgrade finished.`r`n"
-                if ($chkRemoveDesktopIcons.IsChecked) { Start-DesktopWatch -Before $script:preShortcuts -RelatedNames $script:relatedNames }
-                Append-Log "`r`nRefreshing list...`r`n"
-                Start-CheckForUpdates
+                Start-CheckForUpdates -KeepLog
             }
             'resetSources' {
                 Append-Log "`r`nSources reset. Updating them now...`r`n"
-                Start-SourceUpdate
+                Start-SourceUpdate -KeepLog
             }
             'sourceUpdate' {
                 Append-Log "`r`nSource update finished. Refreshing list...`r`n"
-                Start-CheckForUpdates
+                Start-CheckForUpdates -KeepLog
             }
             'diagnose' {
                 Set-UiBusy -Busy $false -Status 'Diagnostics complete.'
@@ -657,6 +775,8 @@ $timer.Add_Tick({
         }
     }
 })
+
+$dataGrid.Add_SelectionChanged({ Update-ActionButtons })
 
 $btnCheck.Add_Click({ Start-CheckForUpdates })
 
@@ -672,7 +792,11 @@ $btnUpgradeAll.Add_Click({
             $script:relatedNames = @($dataGrid.ItemsSource | ForEach-Object { $_.Name })
         }
         $src = Get-SourceArg
-        Start-WingetOperation -Arguments "upgrade --all $src --accept-package-agreements --accept-source-agreements --disable-interactivity" `
+        # Match what the list shows: if it was built with --include-unknown, packages with
+        # an "Unknown" installed version appear as outdated, and --all silently skips them
+        # unless it's given the same flag.
+        $extra = if ($chkIncludeUnknown.IsChecked) { '--include-unknown' } else { '' }
+        Start-WingetOperation -Arguments "upgrade --all $extra $src --accept-package-agreements --accept-source-agreements --disable-interactivity" `
             -Mode 'upgradeAll' -StatusText 'Upgrading all packages...'
     }
 })
@@ -697,23 +821,30 @@ $txtSearchQuery.Add_KeyDown({
 })
 
 $btnInstallSelected.Add_Click({
-    $item = $dataGrid.SelectedItem
-    if (-not $item) {
-        [System.Windows.MessageBox]::Show("Select a package in the list first (use Search to find one).", "Winget GUI", 'OK', 'Warning') | Out-Null
+    $items = Get-SelectedPackages
+    if ($items.Count -eq 0) {
+        [System.Windows.MessageBox]::Show("Select one or more packages in the search results first (Ctrl+click or Shift+click to select several).", "Winget GUI", 'OK', 'Warning') | Out-Null
         return
     }
     $confirm = [System.Windows.MessageBox]::Show(
-        "Install '$($item.Name)' ($($item.Id)) now?",
+        "Install $($items.Count) package(s) now?`r`n`r`n$(Format-PackageList -Items $items)",
         "Confirm Install", 'YesNo', 'Question')
     if ($confirm -eq 'Yes') {
-        if ($chkRemoveDesktopIcons.IsChecked) {
-            $script:preShortcuts = Get-DesktopShortcutSnapshot
-            $script:relatedNames = @($item.Name)
-        }
-        $src        = Get-SourceArg
-        $escapedId  = $item.Id
-        Start-WingetOperation -Arguments "install --id `"$escapedId`" -e $src --accept-package-agreements --accept-source-agreements --disable-interactivity" `
-            -Mode 'installOne' -StatusText "Installing $($item.Name)..."
+        Start-PackageQueue -Items $items -Action 'install'
+    }
+})
+
+$btnUpgradeSelected.Add_Click({
+    $items = Get-SelectedPackages
+    if ($items.Count -eq 0) {
+        [System.Windows.MessageBox]::Show("Select one or more packages in the list first (Ctrl+click or Shift+click to select several).", "Winget GUI", 'OK', 'Warning') | Out-Null
+        return
+    }
+    $confirm = [System.Windows.MessageBox]::Show(
+        "Upgrade $($items.Count) package(s) now?`r`n`r`n$(Format-PackageList -Items $items)",
+        "Confirm Upgrade", 'YesNo', 'Question')
+    if ($confirm -eq 'Yes') {
+        Start-PackageQueue -Items $items -Action 'upgrade'
     }
 })
 
@@ -723,45 +854,42 @@ $btnAbout.Add_Click({
         "Winget Update Manager`r`n" +
         "Version $script:AppVersion`r`n`r`n" +
         "A simple GUI front end for winget (Windows Package Manager).`r`n`r`n" +
-        "Checks for available updates, upgrades a selected package or everything at once, " +
+        "Checks for available updates, upgrades selected packages or everything at once, " +
         "lets you search for new software and install it, and includes tools to reset " +
         "winget's sources and diagnose network issues when package searches fail. Runs " +
         "elevated (as Administrator) automatically.`r`n`r`n" +
+        "New in $($script:AppVersion): select several packages at once (Ctrl+click or " +
+        "Shift+click) to install or upgrade them in one go, with a summary at the end.`r`n`r`n" +
         "Detected winget version: $wingetVersion",
         "About Winget Update Manager", 'OK', 'Information') | Out-Null
 })
 
-$btnExit.Add_Click({
-    $desktopWatchTimer.Stop()
+# Exit button and the window's own close (X) button go through the same check.
+$btnExit.Add_Click({ $window.Close() })
+
+$window.Add_Closing({
+    param($sender, $e)
     if ($script:proc -and -not $script:proc.HasExited) {
+        $pending = $script:queue.Count
+        $extra   = if ($pending -gt 0) { " $pending more queued package(s) will not be processed." } else { '' }
         $confirm = [System.Windows.MessageBox]::Show(
-            "A winget operation is still running. Exit anyway?",
+            "A winget operation is still running.$extra Exit anyway?",
             "Confirm Exit", 'YesNo', 'Warning')
-        if ($confirm -ne 'Yes') { return }
+        if ($confirm -ne 'Yes') {
+            $e.Cancel = $true
+            return
+        }
         try { $script:proc.Kill() } catch { }
     }
-    $window.Close()
+    $script:queue.Clear()
+    $timer.Stop()
+    $desktopWatchTimer.Stop()
+    if ($script:tempOut -or $script:tempErr) {
+        Remove-Item -Path $script:tempOut, $script:tempErr -ErrorAction SilentlyContinue
+    }
 })
 
-$btnUpgradeSelected.Add_Click({
-    $item = $dataGrid.SelectedItem
-    if (-not $item) {
-        [System.Windows.MessageBox]::Show("Select a package in the list first.", "Winget GUI", 'OK', 'Warning') | Out-Null
-        return
-    }
-    $confirm = [System.Windows.MessageBox]::Show(
-        "Upgrade '$($item.Name)' ($($item.Id)) now?",
-        "Confirm Upgrade", 'YesNo', 'Question')
-    if ($confirm -eq 'Yes') {
-        if ($chkRemoveDesktopIcons.IsChecked) {
-            $script:preShortcuts = Get-DesktopShortcutSnapshot
-            $script:relatedNames = @($item.Name)
-        }
-        $escapedId = $item.Id
-        Start-WingetOperation -Arguments "upgrade --id `"$escapedId`" -e --accept-package-agreements --accept-source-agreements --disable-interactivity" `
-            -Mode 'upgradeOne' -StatusText "Upgrading $($item.Name)..."
-    }
-})
+Update-ActionButtons
 
 # Kick off an initial check as soon as the window is shown.
 $window.Add_ContentRendered({ Start-CheckForUpdates })

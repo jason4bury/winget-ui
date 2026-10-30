@@ -4,16 +4,17 @@
   <img src="assets/winget-gui-logo.png" alt="Winget GUI logo" width="200">
 </p>
 
-A small PowerShell + WPF front end for [winget](https://learn.microsoft.com/en-us/windows/package-manager/winget/) (the Windows Package Manager). It gives you a checkable list of what's outdated and buttons to upgrade everything, upgrade one package at a time, and recover from the source/network issues winget occasionally runs into.
+A small PowerShell + WPF front end for [winget](https://learn.microsoft.com/en-us/windows/package-manager/winget/) (the Windows Package Manager). It gives you a checkable list of what's outdated and buttons to upgrade everything, upgrade or install one or several selected packages, and recover from the source/network issues winget occasionally runs into.
 
 ![Windows](https://img.shields.io/badge/platform-Windows-blue) ![PowerShell](https://img.shields.io/badge/PowerShell-5.1%2B%20%7C%207%2B-5391FE)
 
 ## Features
 
 - On launch, automatically runs `winget upgrade` and lists what's outdated in a sortable grid (Name, Id, Version, Available, Source).
-- **Search** — type a name and search winget's sources (`winget search`), then **Install Selected** to install whatever you pick from the results, with the same confirmation prompt and live log output as an upgrade.
+- **Search** — type a name and search winget's sources (`winget search`), then **Install Selected** to install whatever you pick from the results (one package or several), with the same confirmation prompt and live log output as an upgrade.
 - **Upgrade All** — runs `winget upgrade --all` with a confirmation prompt, streaming live output into a log pane.
-- **Upgrade Selected** — upgrades just the highlighted package.
+- **Upgrade Selected** — upgrades just the highlighted package(s).
+- **Multi-select** — Ctrl+click or Shift+click to select several packages in the list; **Install Selected**/**Upgrade Selected** then process them one after another, with a separate log section for each and a summary at the end showing which succeeded. The buttons show how many are selected, e.g. "Install Selected (3)".
 - **Reset Sources** — runs `winget source reset --force` followed by `winget source update`, for when package searches start failing.
 - **Diagnose Network** — checks WinHTTP vs. WinINet proxy configuration and reachability to winget's backend hosts, for tracking down "failed to search source" errors caused by proxies or content filters.
 - Checkbox to skip the Microsoft Store (`msstore`) source, which avoids a recurring source-agreement prompt on machines where it's never been accepted interactively.
@@ -49,7 +50,7 @@ Run `Build-Exe.ps1` (included in this repo) from the same folder as `WinGet-GUI.
 .\Build-Exe.ps1
 ```
 
-It takes care of the execution-policy workaround, installs the `ps2exe` module the first time it's needed, and compiles the exe with the icon and `-STA -requireAdmin -noConsole` switches below — naming the output `WinGet-GUI v<version>.exe` (e.g. `WinGet-GUI v1.11.0.exe`) and reading `<version>` straight out of `$script:AppVersion`, so the exe's filename and version metadata can't go stale. Use `-ScriptPath`, `-IconPath` or `-OutputPath` if you want to point it somewhere else or name it something else.
+It takes care of the execution-policy workaround, installs the `ps2exe` module the first time it's needed, and compiles the exe with the icon and `-STA -requireAdmin -noConsole` switches below — naming the output `WinGet-GUI v<version>.exe` (e.g. `WinGet-GUI v1.12.0.exe`) and reading `<version>` straight out of `$script:AppVersion`, so the exe's filename and version metadata can't go stale. Use `-ScriptPath`, `-IconPath` or `-OutputPath` if you want to point it somewhere else or name it something else.
 
 If you'd rather run the ps2exe steps yourself instead, that's exactly what `Build-Exe.ps1` automates:
 
@@ -61,10 +62,10 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 Install-Module -Name ps2exe -Scope CurrentUser -Force
 Import-Module ps2exe
 
-Invoke-ps2exe -inputFile .\WinGet-GUI.ps1 -outputFile ".\WinGet-GUI v1.11.0.exe" `
+Invoke-ps2exe -inputFile .\WinGet-GUI.ps1 -outputFile ".\WinGet-GUI v1.12.0.exe" `
     -STA -requireAdmin -noConsole `
     -iconFile .\WinGet-GUI.ico `
-    -title "Winget Update Manager" -version "1.11.0" -product "Winget GUI"
+    -title "Winget Update Manager" -version "1.12.0" -product "Winget GUI"
 ```
 
 `-STA` and `-requireAdmin` bake the WPF thread and elevation requirements directly into the `.exe`'s manifest, so Windows handles both automatically before the script even runs — the script detects when it's running as a compiled `.exe` and skips its own manual relaunch logic in that case, so you won't get a double UAC prompt. `-noConsole` hides the PowerShell console window behind the GUI. `-iconFile` gives the compiled `.exe` its own icon (`WinGet-GUI.ico`, included in this repo) — it needs a real multi-resolution `.ico` file, not a `.png`/`.jpg` directly. The resulting `WinGet-GUI.exe` is fully standalone (winget itself still needs to be installed on the target machine, as before).

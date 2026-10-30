@@ -2,6 +2,36 @@
 
 All notable changes to this project are documented here.
 
+## [1.12.0] - 2026-10-30
+### Added
+- Multi-select in the package list (Ctrl+click / Shift+click). **Install Selected** and
+  **Upgrade Selected** now work through every selected package one after another, each in its
+  own clearly marked section of the log, then print a summary showing which succeeded and the
+  exit code of any that didn't.
+- The two "Selected" buttons show how many packages are selected, e.g. "Install Selected (3)".
+
+### Fixed
+- **Upgrade All** now passes `--include-unknown` when "Include unknown versions" is ticked, so it
+  upgrades the same packages the list shows instead of silently skipping ones whose installed
+  version winget can't detect.
+- **Upgrade Selected** now honours the "Skip Microsoft Store (msstore) source" checkbox, like
+  Install and Upgrade All already did.
+- Closing the window with the X now gets the same "operation still running" check as the Exit
+  button, and stops the timers and cleans up temp files, instead of leaving winget running with
+  no window.
+- winget's output is now read as UTF-8. Windows PowerShell 5.1 otherwise reads it as ANSI,
+  garbling winget's truncation character and non-ASCII package names, which could also throw
+  the column parsing off.
+- The automatic list refresh after an install, upgrade or source reset no longer wipes the log,
+  so the operation's own output and any desktop-icon cleanup messages stay visible.
+- **Upgrade Selected** is disabled while search results are shown (they may not be installed),
+  and **Install Selected** is disabled while the list of updates is shown.
+
+### Changed
+- Removed the separate elevated-retry path when deleting a desktop shortcut, since the app
+  always runs elevated now and the retry could never help.
+- About box updated to describe multi-select.
+
 ## [1.11.0] - 2026-10-09
 ### Added
 - The script now hides its own PowerShell console window on launch (via a `GetConsoleWindow`/
