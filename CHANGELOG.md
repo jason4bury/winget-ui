@@ -25,7 +25,9 @@ All notable changes to this project are documented here.
   for Task Scheduler or Intune. Also `-Silent`, `-SkipUnknown`, `-IncludeStore` and
   `-KeepDesktopIcons`. Works as SYSTEM: winget is found in the App Installer package folder
   when it isn't on the PATH.
-- The log pane and Details pane can be resized by dragging the splitters.
+- The log pane and Details pane can be resized by dragging the splitters. The log pane is
+  taller by default (and the window taller to fit), its height is remembered, and the window
+  is shrunk to fit smaller screens.
 
 ### Changed
 - Toolbar reorganised into two rows, with the current view and its item count shown above the
@@ -35,14 +37,19 @@ All notable changes to this project are documented here.
 - Long package Ids that winget truncated with "..." in its table are now matched by prefix
   instead of failing an exact match.
 
-- `Build-Exe.ps1` replaced by `Build-Exe.cmd`: double-click to build the app exe plus
-  `Build-Exe.exe`, a builder exe that rebuilds the app exe with a double-click. No PowerShell
+- `Build-Exe.ps1` replaced by `Build-Exe.cmd`: double-click to build the exe, no PowerShell
   window or admin rights needed. It sets the execution policy for the build only, installs
   ps2exe if it's missing (enabling TLS 1.2 and installing the NuGet provider first, so it works
   unattended on a fresh PC), and saves its output to `Build-Exe.log`.
 - `*.exe` added to `.gitignore`: attach builds to GitHub releases instead of committing them.
 
 ### Fixed
+- **Diagnose Network** reported errors on networks where winget works fine. It requested the
+  bare server addresses (which return 404 by design) and still tested `winget.azureedge.net`,
+  which Microsoft has retired. It now checks DNS, TCP, the TLS certificate (a non-Microsoft
+  issuer means SSL inspection by a web filter) and the real winget source file, treats any
+  HTTP answer from a bare address as "reached", marks each check OK / PROBLEM and ends with a
+  summary.
 - "Leaving new desktop icon alone" was logged every two seconds during the 20-second
   desktop-icon check. It's now logged once per icon.
 - The `Source` value for excluded apps no longer picks up the "Pin type" column.

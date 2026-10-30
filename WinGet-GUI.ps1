@@ -484,7 +484,7 @@ if (-not $script:WingetExe) {
 [xml]$xaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Winget Update Manager" Height="820" Width="1360" MinWidth="780" MinHeight="560"
+        Title="Winget Update Manager" Height="980" Width="1360" MinWidth="780" MinHeight="640"
         WindowStartupLocation="CenterScreen">
     <Window.Resources>
         <Style TargetType="Button">
@@ -507,7 +507,7 @@ if (-not $script:WingetExe) {
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*" MinHeight="150"/>
             <RowDefinition Height="6"/>
-            <RowDefinition Height="220" MinHeight="80"/>
+            <RowDefinition x:Name="LogRow" Height="380" MinHeight="120"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
@@ -696,6 +696,7 @@ $txtDetails           = $window.FindName('TxtDetails')
 $txtLog               = $window.FindName('TxtLog')
 $txtStatus            = $window.FindName('TxtStatus')
 $progress             = $window.FindName('Progress')
+$logRow               = $window.FindName('LogRow')
 
 # ---------------------------------------------------------------------------
 # State shared between the UI thread and the poll timer
@@ -748,9 +749,14 @@ $desktopWatchTimer = New-Object System.Windows.Threading.DispatcherTimer
 $desktopWatchTimer.Interval = [TimeSpan]::FromSeconds(2)
 
 # ---------------------------------------------------------------------------
-# Remembered settings (checkboxes, window size/position)
+# Remembered settings (checkboxes, window size/position, log pane height)
 # ---------------------------------------------------------------------------
 $script:settingsPath = Join-Path $env:APPDATA 'WingetUpdateManager\settings.json'
+
+# Bump when the default layout changes, so sizes saved with an older layout are
+# ignored once instead of squashing the new one (e.g. a short window saved before
+# the log pane was made taller).
+$script:layoutVersion = 2
 
 function Import-AppSettings {
     try {
@@ -764,9 +770,13 @@ function Import-AppSettings {
     if ($null -ne $s.RemoveDesktopIcons) { $chkRemoveDesktopIcons.IsChecked = [bool]$s.RemoveDesktopIcons }
 
     try {
-        if ($s.Width -ge $window.MinWidth -and $s.Height -ge $window.MinHeight) {
+        $sameLayout = ($s.LayoutVersion -eq $script:layoutVersion)
+        if ($sameLayout -and $s.Width -ge $window.MinWidth -and $s.Height -ge $window.MinHeight) {
             $window.Width  = [double]$s.Width
             $window.Height = [double]$s.Height
+        }
+        if ($sameLayout -and $s.LogHeight -ge $logRow.MinHeight) {
+            $logRow.Height = New-Object System.Windows.GridLength([double]$s.LogHeight)
         }
         # Only restore the position if it's still on a screen (e.g. not on a monitor
         # that has since been unplugged).
@@ -785,6 +795,28 @@ function Import-AppSettings {
     } catch { }
 }
 
+function Limit-WindowToScreen {
+    # The default height suits a 1080p screen; on a smaller screen (or with a large
+    # taskbar or display scaling) shrink the window, and the log pane with it, so
+    # nothing ends up off the bottom of the screen.
+    try {
+        $workArea = [System.Windows.SystemParameters]::WorkArea
+        if ($window.Height -gt $workArea.Height) {
+            $shrinkBy = $window.Height - $workArea.Height
+            $window.Height = [math]::Max($window.MinHeight, $workArea.Height)
+            if ($window.WindowStartupLocation -eq 'Manual') { $window.Top = $workArea.Top }
+            if ($logRow.Height.IsAbsolute) {
+                $newLog = [math]::Max($logRow.MinHeight, $logRow.Height.Value - ($shrinkBy / 2))
+                $logRow.Height = New-Object System.Windows.GridLength($newLog)
+            }
+        }
+        if ($window.Width -gt $workArea.Width) {
+            $window.Width = [math]::Max($window.MinWidth, $workArea.Width)
+            if ($window.WindowStartupLocation -eq 'Manual') { $window.Left = $workArea.Left }
+        }
+    } catch { }
+}
+
 function Export-AppSettings {
     try {
         $bounds = if ($window.WindowState -eq 'Normal') {
@@ -796,6 +828,8 @@ function Export-AppSettings {
             SkipStore          = [bool]$chkSkipStore.IsChecked
             RemoveDesktopIcons = [bool]$chkRemoveDesktopIcons.IsChecked
             Maximized          = ($window.WindowState -eq 'Maximized')
+            LayoutVersion      = $script:layoutVersion
+            LogHeight          = [math]::Round($logRow.ActualHeight)
         }
         if (-not $bounds.IsEmpty) {
             $s.Left = [math]::Round($bounds.Left); $s.Top = [math]::Round($bounds.Top)
@@ -822,7 +856,10 @@ function Get-ViewName {
 
 function Get-GridView {
     if ($null -eq $dataGrid.ItemsSource) { return $null }
-    return [System.Windows.Data.CollectionViewSource]::GetDefaultView($dataGrid.ItemsSource)
+    # The unary comma matters: a collection view is itself enumerable, so without it
+    # PowerShell "unrolls" it on return and the caller gets the rows instead of the
+    # view (and then can't set .Filter on it).
+    return ,([System.Windows.Data.CollectionViewSource]::GetDefaultView($dataGrid.ItemsSource))
 }
 
 function Update-ViewLabel {
@@ -1024,50 +1061,145 @@ function Start-SourceUpdate {
 }
 
 function Start-NetworkDiagnostics {
-    # winget talks to its backends over WinHTTP, which has its OWN proxy
-    # configuration separate from the browser's (WinINet). On a network with a
-    # proxy set up only for browsers, this is the single most common reason
-    # "winget" (the default source) fails to search while everything else
-    # (browsing, Store apps, etc.) looks fine. This runs the checks that reveal
-    # that, plus basic reachability to the source endpoints, without needing a
-    # separate terminal.
+    # Checks the things that stop winget reaching its sources, without needing a
+    # separate terminal: a proxy set up for browsers (WinINet) but not for winget
+    # (WinHTTP); DNS, firewall and TLS problems; SSL inspection by a web filter
+    # (spotted by a non-Microsoft certificate issuer); and whether winget's real
+    # source file can be fetched. Each check prints OK / PROBLEM, then a summary.
+    # Note: a 404 from a bare server address is normal and counts as "reached".
     $diagScript = @'
-Write-Output "=== WinHTTP proxy configuration (this is what winget actually uses) ==="
-netsh winhttp show proxy
-Write-Output ""
-Write-Output "=== WinINet / system proxy (what browsers use, for comparison) ==="
+$problems = New-Object System.Collections.Generic.List[string]
+function Write-Check([string]$Status, [string]$Text) { Write-Output ("  [{0}] {1}" -f $Status, $Text) }
+
+Write-Output "=== winget ==="
 try {
-    $reg = Get-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings" -ErrorAction Stop
-    Write-Output "ProxyEnable: $($reg.ProxyEnable)   ProxyServer: $($reg.ProxyServer)"
+    $ver = (winget --version 2>$null | Select-Object -First 1)
+    Write-Check 'OK' "winget version $ver"
 } catch {
-    Write-Output "Could not read WinINet proxy settings: $($_.Exception.Message)"
+    Write-Check 'PROBLEM' "winget didn't run: $($_.Exception.Message)"
+    $problems.Add('winget itself did not run')
+}
+Write-Output ""
+Write-Output "Configured sources:"
+try { winget source list --disable-interactivity 2>&1 | ForEach-Object { "  $_" } } catch { }
+
+Write-Output ""
+Write-Output "=== Proxy settings ==="
+$winhttp = (netsh winhttp show proxy) -join ' '
+$winhttpDirect = $winhttp -match 'Direct access'
+$inet = $null
+try { $inet = Get-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings' -ErrorAction Stop } catch { }
+$inetProxy = ($inet -and $inet.ProxyEnable -eq 1 -and $inet.ProxyServer)
+$inetPac   = ($inet -and $inet.AutoConfigURL)
+
+if ($winhttpDirect) { Write-Check 'OK' 'WinHTTP (used by winget): direct access, no proxy' }
+else { Write-Check 'INFO' "WinHTTP (used by winget): $(($winhttp -replace '\s+', ' ').Trim())" }
+if ($inetProxy)    { Write-Check 'INFO' "Browser (WinINet) proxy: $($inet.ProxyServer)" }
+elseif ($inetPac)  { Write-Check 'INFO' "Browser (WinINet) proxy script: $($inet.AutoConfigURL)" }
+else               { Write-Check 'OK' 'Browser (WinINet): no proxy' }
+if ($winhttpDirect -and ($inetProxy -or $inetPac)) {
+    Write-Check 'PROBLEM' 'Browsers use a proxy but winget (WinHTTP) does not. Fix, from an elevated prompt: netsh winhttp import proxy source=ie'
+    $problems.Add('proxy mismatch between browsers and winget')
 }
 
-$hostsToTest = @('cdn.winget.microsoft.com','winget.azureedge.net','storeedgefd.dsx.mp.microsoft.com')
-foreach ($h in $hostsToTest) {
+# Real endpoints winget uses. Any HTTP answer (even 404 on a bare address) means the
+# server was reached; only DNS/connection/TLS failures, timeouts and 407s are problems.
+$checks = @(
+    @{ Name = 'winget source (cdn.winget.microsoft.com)'; Host = 'cdn.winget.microsoft.com'; Url = 'https://cdn.winget.microsoft.com/cache/source.msix'; ExpectFile = $true },
+    @{ Name = 'Microsoft Store source (storeedgefd.dsx.mp.microsoft.com)'; Host = 'storeedgefd.dsx.mp.microsoft.com'; Url = 'https://storeedgefd.dsx.mp.microsoft.com/v9.0'; ExpectFile = $false }
+)
+
+try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
+
+foreach ($c in $checks) {
     Write-Output ""
-    Write-Output "=== $h ==="
-    try {
-        $result = Test-NetConnection -ComputerName $h -Port 443 -WarningAction SilentlyContinue
-        Write-Output "TCP 443 reachable: $($result.TcpTestSucceeded)   Resolved IP: $($result.RemoteAddress)"
-    } catch {
-        Write-Output "TCP test failed: $($_.Exception.Message)"
+    Write-Output "=== $($c.Name) ==="
+
+    # DNS
+    $ips = @()
+    try { $ips = @([Net.Dns]::GetHostAddresses($c.Host) | ForEach-Object { $_.IPAddressToString }) } catch { }
+    if ($ips.Count -eq 0) {
+        Write-Check 'PROBLEM' "DNS: $($c.Host) could not be resolved"
+        $problems.Add("$($c.Host) does not resolve (DNS)")
+        continue
     }
+    Write-Check 'OK' "DNS: $($ips[0])"
+
+    # TCP
+    $tcpOk = $false
     try {
-        $resp = Invoke-WebRequest -Uri "https://$h" -Method Head -UseBasicParsing -TimeoutSec 8
-        Write-Output "HTTPS HEAD status: $($resp.StatusCode)"
+        $client = New-Object Net.Sockets.TcpClient
+        $tcpOk = $client.ConnectAsync($c.Host, 443).Wait(8000) -and $client.Connected
+        $client.Close()
+    } catch { }
+    if (-not $tcpOk) {
+        Write-Check 'PROBLEM' 'TCP 443: no connection (firewall block or no internet)'
+        $problems.Add("$($c.Host) port 443 blocked")
+        continue
+    }
+    Write-Check 'OK' 'TCP 443: connected'
+
+    # TLS certificate - a non-Microsoft issuer means something (e.g. a web filter) is
+    # decrypting and re-signing the traffic, which can corrupt winget's source download.
+    try {
+        $tcp = New-Object Net.Sockets.TcpClient($c.Host, 443)
+        $ssl = New-Object Net.Security.SslStream($tcp.GetStream(), $false, ({ $true }))
+        $ssl.AuthenticateAsClient($c.Host)
+        $cert = New-Object Security.Cryptography.X509Certificates.X509Certificate2($ssl.RemoteCertificate)
+        $issuer = $cert.Issuer
+        $ssl.Dispose(); $tcp.Close()
+        if ($issuer -match 'Microsoft|DigiCert') {
+            Write-Check 'OK' "Certificate issued by: $issuer"
+        } else {
+            Write-Check 'PROBLEM' "Certificate issued by: $issuer - not Microsoft. Looks like SSL inspection by a web filter; ask for this domain to be excluded from inspection."
+            $problems.Add("SSL inspection on $($c.Host)")
+        }
     } catch {
-        Write-Output "HTTPS HEAD failed: $($_.Exception.Message)"
+        Write-Check 'PROBLEM' "TLS handshake failed: $($_.Exception.Message)"
+        $problems.Add("TLS failure to $($c.Host)")
+    }
+
+    # HTTPS
+    try {
+        $resp = Invoke-WebRequest -Uri $c.Url -Method Head -UseBasicParsing -TimeoutSec 15
+        $type = [string]$resp.Headers['Content-Type']
+        if ($c.ExpectFile -and $type -match 'html') {
+            Write-Check 'PROBLEM' "HTTPS: got a web page ($type) instead of the source file - probably a filter's block page"
+            $problems.Add("block page instead of $($c.Url)")
+        } else {
+            $size = $resp.Headers['Content-Length']
+            $extra = if ($c.ExpectFile -and $size) { " ($([math]::Round([double]$size / 1MB, 1)) MB source file)" } else { '' }
+            Write-Check 'OK' "HTTPS: $($resp.StatusCode)$extra"
+        }
+    } catch {
+        $code = $null
+        try { $code = [int]$_.Exception.Response.StatusCode } catch { }
+        if ($code -eq 407) {
+            Write-Check 'PROBLEM' 'HTTPS: 407 - the proxy wants a login, which winget cannot provide'
+            $problems.Add("proxy authentication required for $($c.Host)")
+        } elseif ($code -and -not $c.ExpectFile) {
+            # The server answered; there's just no page at this address. That's normal.
+            Write-Check 'OK' "HTTPS: server reached (HTTP $code is normal for this address)"
+        } elseif ($code) {
+            Write-Check 'PROBLEM' "HTTPS: HTTP $code fetching $($c.Url)"
+            $problems.Add("HTTP $code from $($c.Url)")
+        } else {
+            Write-Check 'PROBLEM' "HTTPS: $($_.Exception.Message)"
+            $problems.Add("HTTPS failure to $($c.Host)")
+        }
     }
 }
 
 Write-Output ""
-Write-Output "=== How to read this ==="
-Write-Output "If WinHTTP shows 'Direct access (no proxy server)' but WinINet/your browser DOES use a proxy,"
-Write-Output "that mismatch is almost certainly why winget fails. Fix (run elevated):"
-Write-Output "    netsh winhttp import proxy source=ie"
-Write-Output "A '407' in the HTTPS HEAD result means the proxy needs authentication winget cannot provide."
-Write-Output "A TCP failure or timeout on all three hosts points to a firewall block on those domains."
+Write-Output "=== Result ==="
+if ($problems.Count -eq 0) {
+    Write-Output "  No problems found. winget can reach its sources normally."
+} else {
+    Write-Output "  $($problems.Count) problem(s) found:"
+    foreach ($p in $problems) { Write-Output "    - $p" }
+    Write-Output ""
+    Write-Output "  If searches still fail after fixing these, try Reset Sources."
+}
 '@
 
     $bytes   = [System.Text.Encoding]::Unicode.GetBytes($diagScript)
@@ -1696,6 +1828,7 @@ $window.Add_Closing({
 })
 
 Import-AppSettings
+Limit-WindowToScreen
 Update-ActionButtons
 
 # Kick off an initial check as soon as the window is shown.

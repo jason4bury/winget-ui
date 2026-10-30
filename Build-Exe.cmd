@@ -11,12 +11,7 @@ exit /b %BUILD_RESULT%
 : end of batch part #>
 
 # ===========================================================================
-# Build-Exe.cmd - builds the two exes for Winget Update Manager:
-#
-#   WinGet-GUI v<version>.exe   the app itself (from WinGet-GUI.ps1)
-#   Build-Exe.exe               a builder that rebuilds the app exe, made from
-#                               this same code, so later builds are just a
-#                               double-click on Build-Exe.exe
+# Build-Exe.cmd - compiles WinGet-GUI.ps1 into "WinGet-GUI v<version>.exe".
 #
 # Double-click this file (no admin rights needed). It:
 #   1. sets the execution policy to Bypass for this build only (nothing
@@ -25,8 +20,7 @@ exit /b %BUILD_RESULT%
 #      (turning on TLS 1.2 and installing the NuGet provider first, so this
 #      works unattended on a fresh PC),
 #   3. reads the version from $script:AppVersion in WinGet-GUI.ps1,
-#   4. compiles the app exe with -STA -requireAdmin -noConsole and the icon,
-#   5. compiles Build-Exe.exe (only when run as this .cmd).
+#   4. compiles the exe with -STA -requireAdmin -noConsole and the icon.
 #
 # Expects WinGet-GUI.ps1 and WinGet-GUI.ico in the same folder.
 # Everything shown on screen is also written to Build-Exe.log.
@@ -34,13 +28,7 @@ exit /b %BUILD_RESULT%
 
 $ErrorActionPreference = 'Stop'
 
-# Running as Build-Exe.cmd (via powershell.exe) or as the compiled Build-Exe.exe?
-$hostPath     = (Get-Process -Id $PID).Path
-$runningAsExe = [System.IO.Path]::GetFileNameWithoutExtension($hostPath) -notin @('powershell', 'pwsh')
-
-$here = if ($runningAsExe) { Split-Path -Parent $hostPath }
-        elseif ($env:BUILD_DIR) { $env:BUILD_DIR.TrimEnd('\') }
-        else { (Get-Location).Path }
+$here = if ($env:BUILD_DIR) { $env:BUILD_DIR.TrimEnd('\') } else { (Get-Location).Path }
 
 $scriptPath = Join-Path $here 'WinGet-GUI.ps1'
 $iconPath   = Join-Path $here 'WinGet-GUI.ico'
@@ -98,8 +86,7 @@ try {
     }
     Import-Module ps2exe
 
-    # --- 1. The app ---------------------------------------------------------
-    Write-Host "Building WinGet-GUI.exe (version $version)..." -ForegroundColor Cyan
+    Write-Host "Building WinGet-GUI v$version.exe..." -ForegroundColor Cyan
     Write-Host "  Script: $scriptPath"
     Write-Host "  Output: $outputPath"
     Write-Host ''
@@ -122,43 +109,6 @@ try {
     }
     Write-Host ''
     Write-Host "Done: $outputPath" -ForegroundColor Green
-
-    # --- 2. The builder (only when run as the .cmd) --------------------------
-    if (-not $runningAsExe -and $env:BUILD_FILE) {
-        $builderOut = Join-Path $here 'Build-Exe.exe'
-        Write-Host ''
-        Write-Host 'Building Build-Exe.exe...' -ForegroundColor Cyan
-        Write-Host "  Output: $builderOut"
-        Write-Host ''
-
-        # Compile the PowerShell part of this .cmd (everything after the batch part).
-        $source = [IO.File]::ReadAllText($env:BUILD_FILE)
-        $marker = ': end of batch part #>'
-        $psPart = $source.Substring($source.IndexOf($marker) + $marker.Length)
-        $tempPs = Join-Path ([IO.Path]::GetTempPath()) 'Build-Exe-source.ps1'
-        [IO.File]::WriteAllText($tempPs, $psPart, (New-Object System.Text.UTF8Encoding($true)))
-
-        try {
-            # A console app (so its progress can be read) that doesn't need admin rights.
-            $builderArgs = @{
-                inputFile  = $tempPs
-                outputFile = $builderOut
-                title      = 'Winget Update Manager - exe builder'
-                version    = $version
-                product    = 'Winget GUI'
-            }
-            if ($useIcon) { $builderArgs['iconFile'] = $iconPath }
-            Invoke-ps2exe @builderArgs
-        } finally {
-            Remove-Item -LiteralPath $tempPs -ErrorAction SilentlyContinue
-        }
-
-        if (-not (Test-Path -LiteralPath $builderOut)) {
-            throw "ps2exe didn't report an error, but $builderOut wasn't created."
-        }
-        Write-Host ''
-        Write-Host "Done: $builderOut" -ForegroundColor Green
-    }
 } catch {
     $failed = $true
     Write-Host ''
@@ -166,13 +116,5 @@ try {
 }
 
 try { Stop-Transcript | Out-Null } catch { }
-
-# The .cmd pauses by itself; the exe needs to, or its window closes before the
-# result can be read.
-if ($runningAsExe) {
-    Write-Host ''
-    Write-Host 'Press any key to close...'
-    try { [void][System.Console]::ReadKey($true) } catch { }
-}
 
 if ($failed) { [Environment]::Exit(1) }

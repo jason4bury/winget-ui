@@ -21,10 +21,10 @@ A small PowerShell + WPF front end for [winget](https://learn.microsoft.com/en-u
 - **Filter** — type in the filter box to narrow the current list by name or Id. It only affects what's shown; **Upgrade All** still upgrades everything.
 - **Details pane** — select a package and click **Show Details** (or double-click it) to see its publisher, description, licence and links (`winget show`), with buttons to open its homepage and release notes.
 - **Save Log** — saves the log pane to a text file, e.g. to attach to a ticket.
-- Remembers the checkbox settings and the window's size and position between runs (in `%APPDATA%\WingetUpdateManager\settings.json`).
+- Remembers the checkbox settings, the window's size and position, and the log pane's height between runs (in `%APPDATA%\WingetUpdateManager\settings.json`).
 - **Multi-select** — Ctrl+click or Shift+click to select several packages in the list; the **Selected** buttons (install, upgrade, uninstall, exclude) then process them one after another, with a separate log section for each and a summary at the end showing which succeeded. The buttons show how many are selected, e.g. "Install Selected (3)".
 - **Reset Sources** — runs `winget source reset --force` followed by `winget source update`, for when package searches start failing.
-- **Diagnose Network** — checks WinHTTP vs. WinINet proxy configuration and reachability to winget's backend hosts, for tracking down "failed to search source" errors caused by proxies or content filters.
+- **Diagnose Network** — checks the proxy settings winget uses (WinHTTP) against the browser's (WinINet), then DNS, firewall, TLS and HTTPS access to winget's real sources, including spotting SSL inspection by a web filter (a non-Microsoft certificate issuer). Each check shows OK or PROBLEM, with a summary at the end, for tracking down "failed to search source" errors caused by proxies or content filters.
 - Checkbox to skip the Microsoft Store (`msstore`) source, which avoids a recurring source-agreement prompt on machines where it's never been accepted interactively.
 - Checkbox to include packages with unknown/undetectable versions (`--include-unknown`).
 - Checkbox to automatically remove any new desktop icons (`.lnk`/`.url`, on either your Desktop or the shared Public Desktop) that an install/upgrade creates, so **Upgrade All**/**Upgrade Selected**/**Install Selected** don't leave a trail of shortcuts behind. Keeps checking for 20 seconds after the operation finishes, since some installers create their shortcut via a background process rather than immediately — and only removes a new shortcut if its name plausibly matches the package(s) just installed/upgraded, so icons you already had (including pinned ones) are left alone.
@@ -74,10 +74,7 @@ It works when run as SYSTEM (an Intune script, or a scheduled task set to run as
 
 If you'd rather distribute a single `.exe` than a `.ps1` (e.g. for deployment via Intune), you can compile it with the free, open-source [ps2exe](https://github.com/MScholtes/PS2EXE) module. This has to be run on a real Windows PowerShell/pwsh install — it can't be produced any other way.
 
-Double-click `Build-Exe.cmd` (included in this repo) in the same folder as `WinGet-GUI.ps1` and `WinGet-GUI.ico`. No admin rights or open PowerShell window needed. It builds two exes:
-
-- `WinGet-GUI v<version>.exe`: the app.
-- `Build-Exe.exe`: a builder made from the same code. Keep it next to `WinGet-GUI.ps1` and double-click it to rebuild the app exe after changing the script.
+Double-click `Build-Exe.cmd` (included in this repo) in the same folder as `WinGet-GUI.ps1` and `WinGet-GUI.ico`. No admin rights or open PowerShell window needed. It builds `WinGet-GUI v<version>.exe` in the same folder.
 
 It sets the execution policy to Bypass for the build only (nothing machine-wide changes), installs the `ps2exe` module for your user the first time it's needed (turning on TLS 1.2 and installing the NuGet provider first, so it works on a fresh PC without prompts), and compiles the exe with the icon and `-STA -requireAdmin -noConsole` switches below. The output is named `WinGet-GUI v<version>.exe` (e.g. `WinGet-GUI v1.13.0.exe`), with `<version>` read straight out of `$script:AppVersion`, so the exe's filename and version metadata can't go stale. Everything shown on screen is also saved to `Build-Exe.log`.
 
