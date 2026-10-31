@@ -55,7 +55,7 @@ param(
 )
 
 # Bump this whenever you ship a change worth noting in CHANGELOG.md.
-$script:AppVersion = '1.13.0'
+$script:AppVersion = '1.14.0'
 
 $script:cliMode = [bool]$UpgradeAll
 $script:showConsole = $script:cliMode -and -not $Silent
@@ -484,152 +484,386 @@ if (-not $script:WingetExe) {
 [xml]$xaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Winget Update Manager" Height="980" Width="1360" MinWidth="780" MinHeight="640"
-        WindowStartupLocation="CenterScreen">
+        Title="Winget Update Manager" Height="1120" Width="1360" MinWidth="940" MinHeight="660"
+        WindowStartupLocation="CenterScreen" Background="#FFF7EA" FontFamily="Segoe UI" FontSize="13"
+        Foreground="#2B2340">
     <Window.Resources>
+        <!-- Palette, matching the box mascot -->
+        <SolidColorBrush x:Key="Ink" Color="#2B2340"/>
+        <SolidColorBrush x:Key="SoftInk" Color="#5E5672"/>
+        <SolidColorBrush x:Key="Card" Color="#FFFFFF"/>
+        <SolidColorBrush x:Key="CardEdge" Color="#EADFCB"/>
+        <SolidColorBrush x:Key="Mint" Color="#7BE0A0"/>
+        <SolidColorBrush x:Key="Sky" Color="#7FD8FF"/>
+        <SolidColorBrush x:Key="Periwinkle" Color="#5B7CFA"/>
+        <SolidColorBrush x:Key="Sun" Color="#FFE066"/>
+        <SolidColorBrush x:Key="Blush" Color="#FFB4C2"/>
+        <SolidColorBrush x:Key="Lilac" Color="#EEE8FF"/>
+
+        <!-- Rounded "pill" buttons. Tag holds an optional Segoe MDL2 Assets icon glyph. -->
         <Style TargetType="Button">
-            <Setter Property="Height" Value="30"/>
-            <Setter Property="Padding" Value="10,0"/>
-            <Setter Property="Margin" Value="0,0,6,6"/>
-            <Setter Property="MinWidth" Value="80"/>
+            <Setter Property="Background" Value="#FFFFFF"/>
+            <Setter Property="Foreground" Value="#2B2340"/>
+            <Setter Property="BorderBrush" Value="#2B2340"/>
+            <Setter Property="BorderThickness" Value="1.5"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Height" Value="34"/>
+            <Setter Property="Padding" Value="14,0"/>
+            <Setter Property="Margin" Value="0,0,8,8"/>
+            <Setter Property="MinWidth" Value="40"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Grid>
+                            <Border x:Name="Shadow" CornerRadius="17" Background="#2B2340" Margin="0,3,0,-3" Opacity="0.9"/>
+                            <Border x:Name="Face" CornerRadius="17" Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}">
+                                <Grid>
+                                    <Border x:Name="Glow" CornerRadius="16" Background="#FFFFFF" Opacity="0"/>
+                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center"
+                                                Margin="{TemplateBinding Padding}">
+                                        <TextBlock x:Name="Glyph" Text="{TemplateBinding Tag}" FontFamily="Segoe MDL2 Assets"
+                                                   FontSize="14" FontWeight="Normal" VerticalAlignment="Center" Margin="0,1,7,0"/>
+                                        <ContentPresenter VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="Tag" Value="{x:Null}">
+                                <Setter TargetName="Glyph" Property="Visibility" Value="Collapsed"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Glow" Property="Opacity" Value="0.35"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Face" Property="RenderTransform">
+                                    <Setter.Value><TranslateTransform Y="2"/></Setter.Value>
+                                </Setter>
+                                <Setter TargetName="Shadow" Property="Margin" Value="0,1,0,-1"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.4"/>
+                                <Setter Property="Cursor" Value="Arrow"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
-        <Style x:Key="Divider" TargetType="Border">
-            <Setter Property="Width" Value="1"/>
-            <Setter Property="Height" Value="24"/>
-            <Setter Property="Margin" Value="6,0,12,6"/>
-            <Setter Property="Background" Value="#CCCCCC"/>
+        <Style x:Key="MintButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Background" Value="#7BE0A0"/>
+        </Style>
+        <Style x:Key="SkyButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Background" Value="#CDEFFF"/>
+        </Style>
+        <Style x:Key="SunButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Background" Value="#FFE066"/>
+        </Style>
+        <Style x:Key="BlushButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Background" Value="#FFB4C2"/>
+        </Style>
+        <Style x:Key="LilacButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Background" Value="#EEE8FF"/>
+        </Style>
+        <Style x:Key="HeaderButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Background" Value="#FFFFFF"/>
+            <Setter Property="Margin" Value="8,0,0,0"/>
+        </Style>
+
+        <!-- Rounded text boxes for search and filter -->
+        <Style x:Key="PillBox" TargetType="TextBox">
+            <Setter Property="Height" Value="34"/>
+            <Setter Property="Padding" Value="12,0"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Foreground" Value="#2B2340"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Border x:Name="Box" CornerRadius="17" Background="#FFFFFF" BorderBrush="#2B2340" BorderThickness="1.5">
+                            <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Box" Property="BorderBrush" Value="#5B7CFA"/>
+                                <Setter TargetName="Box" Property="BorderThickness" Value="2"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.5"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- White rounded cards -->
+        <Style x:Key="CardBox" TargetType="Border">
+            <Setter Property="Background" Value="#FFFFFF"/>
+            <Setter Property="BorderBrush" Value="#EADFCB"/>
+            <Setter Property="BorderThickness" Value="1.5"/>
+            <Setter Property="CornerRadius" Value="16"/>
+            <Setter Property="Padding" Value="12,12,4,4"/>
+        </Style>
+        <Style x:Key="CardTitle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Foreground" Value="#8A80A0"/>
+            <Setter Property="Margin" Value="2,0,0,6"/>
+        </Style>
+
+        <!-- Friendly data grid -->
+        <Style TargetType="DataGridColumnHeader">
+            <Setter Property="Background" Value="#EEE8FF"/>
+            <Setter Property="Foreground" Value="#2B2340"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Padding" Value="10,8"/>
+            <Setter Property="BorderThickness" Value="0"/>
+        </Style>
+        <Style TargetType="DataGridCell">
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="DataGridCell">
+                        <Border Background="{TemplateBinding Background}" Padding="10,0">
+                            <ContentPresenter VerticalAlignment="Center"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="#CFE0FF"/>
+                    <Setter Property="Foreground" Value="#2B2340"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style TargetType="CheckBox">
+            <Setter Property="Foreground" Value="#2B2340"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
         </Style>
     </Window.Resources>
-    <Grid Margin="10">
+
+    <Grid Margin="16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*" MinHeight="150"/>
-            <RowDefinition Height="6"/>
-            <RowDefinition x:Name="LogRow" Height="380" MinHeight="120"/>
-            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="232"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
 
-        <!-- Row 0: views and package actions -->
-        <Grid Grid.Row="0">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="Auto"/>
-            </Grid.ColumnDefinitions>
-            <WrapPanel Grid.Column="0" Orientation="Horizontal">
-                <Button x:Name="BtnCheck" Content="Check for Updates" ToolTip="Show packages with an update available"/>
-                <Button x:Name="BtnUpgradeSelected" Content="Upgrade Selected"
-                        ToolTip="Upgrade the selected package(s). Ctrl+click or Shift+click to select several."/>
-                <Button x:Name="BtnUpgradeAll" Content="Upgrade All"
-                        ToolTip="Upgrade everything with an update available (excluded apps are skipped)"/>
-                <Border Style="{StaticResource Divider}"/>
-                <Button x:Name="BtnInstalled" Content="Installed Apps" ToolTip="Show everything installed on this PC"/>
-                <Button x:Name="BtnUninstallSelected" Content="Uninstall Selected" ToolTip="Uninstall the selected app(s)"/>
-                <Border Style="{StaticResource Divider}"/>
-                <Button x:Name="BtnExcluded" Content="Excluded Apps"
-                        ToolTip="Show apps excluded from Upgrade All (winget pins)"/>
-                <Button x:Name="BtnExcludeSelected" Content="Exclude Selected"
-                        ToolTip="Stop Upgrade All (and -UpgradeAll mode) from upgrading the selected app(s)"/>
-                <Button x:Name="BtnRemoveExclusion" Content="Remove Exclusion"
-                        ToolTip="Let Upgrade All upgrade the selected app(s) again"/>
-                <Border Style="{StaticResource Divider}"/>
-                <Button x:Name="BtnCancel" Content="Cancel" IsEnabled="False"
-                        ToolTip="Stop the current operation and skip anything still queued"/>
-            </WrapPanel>
-            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top">
-                <Button x:Name="BtnAbout" Content="About" Margin="12,0,6,6"/>
-                <Button x:Name="BtnExit" Content="Exit" Margin="0,0,0,6"/>
+        <!-- Header -->
+        <Border Grid.Row="0" Grid.ColumnSpan="2" CornerRadius="20" Padding="14,8" Margin="0,0,0,14" BorderBrush="#2B2340" BorderThickness="1.5">
+            <Border.Background>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                    <GradientStop Color="#3FA4EE" Offset="0"/>
+                    <GradientStop Color="#5B6CF0" Offset="1"/>
+                </LinearGradientBrush>
+            </Border.Background>
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <Image x:Name="ImgLogo" Grid.Column="0" Width="58" Height="58" Margin="0,0,12,0" VerticalAlignment="Center"
+                       RenderOptions.BitmapScalingMode="HighQuality"/>
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock Text="Winget Update Manager" FontSize="23" FontWeight="Bold" Foreground="#FFFFFF"/>
+                    <TextBlock x:Name="TxtGreeting" Text="Keeping your apps fresh, no terminal needed." FontSize="13" Foreground="#FFFFFF" Margin="1,1,0,0"/>
+                </StackPanel>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button x:Name="BtnAbout" Content="About" Tag="&#xE946;" Style="{StaticResource HeaderButton}"/>
+                    <Button x:Name="BtnExit" Content="Exit" Tag="&#xE7E8;" Style="{StaticResource HeaderButton}"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Sidebar with all the actions -->
+        <ScrollViewer Grid.Row="1" Grid.Column="0" VerticalScrollBarVisibility="Auto" Margin="0,0,14,0">
+            <StackPanel>
+                <Border Style="{StaticResource CardBox}" Padding="12,10,12,4" Margin="0,0,0,10">
+                    <StackPanel>
+                        <TextBlock Text="UPDATES" Style="{StaticResource CardTitle}"/>
+                        <Button x:Name="BtnCheck" Content="Check for Updates" Tag="&#xE72C;" Style="{StaticResource SkyButton}" HorizontalContentAlignment="Left" Margin="0,0,0,7"
+                                ToolTip="Show packages with an update available"/>
+                        <Button x:Name="BtnUpgradeSelected" Content="Upgrade Selected" Tag="&#xE74A;" HorizontalContentAlignment="Left" Margin="0,0,0,7"
+                                ToolTip="Upgrade the selected package(s). Ctrl+click or Shift+click to select several."/>
+                        <Button x:Name="BtnUpgradeAll" Content="Upgrade All" Tag="&#xE895;" Style="{StaticResource MintButton}" HorizontalContentAlignment="Left" Margin="0,0,0,7"
+                                ToolTip="Upgrade everything with an update available (excluded apps are skipped)"/>
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource CardBox}" Padding="12,10,12,4" Margin="0,0,0,10">
+                    <StackPanel>
+                        <TextBlock Text="FIND NEW APPS" Style="{StaticResource CardTitle}"/>
+                        <TextBox x:Name="TxtSearchQuery" Margin="0,0,0,7" Style="{StaticResource PillBox}"
+                                 ToolTip="Type a name (e.g. 'notepad++') then press Enter or click Search"/>
+                        <Button x:Name="BtnSearch" Content="Search" Tag="&#xE721;" Style="{StaticResource SkyButton}" HorizontalContentAlignment="Left" Margin="0,0,0,7"/>
+                        <Button x:Name="BtnInstallSelected" Content="Install Selected" Tag="&#xE896;" Style="{StaticResource MintButton}" HorizontalContentAlignment="Left" Margin="0,0,0,7"
+                                ToolTip="Install the selected search result(s). Ctrl+click or Shift+click to select several."/>
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource CardBox}" Padding="12,10,12,4" Margin="0,0,0,10">
+                    <StackPanel>
+                        <TextBlock Text="INSTALLED APPS" Style="{StaticResource CardTitle}"/>
+                        <Button x:Name="BtnInstalled" Content="Installed Apps" Tag="&#xE71D;" Style="{StaticResource SkyButton}" HorizontalContentAlignment="Left" Margin="0,0,0,7"
+                                ToolTip="Show everything installed on this PC"/>
+                        <Button x:Name="BtnUninstallSelected" Content="Uninstall Selected" Tag="&#xE74D;" Style="{StaticResource BlushButton}" HorizontalContentAlignment="Left" Margin="0,0,0,7"
+                                ToolTip="Uninstall the selected app(s)"/>
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource CardBox}" Padding="12,10,12,4" Margin="0,0,0,10">
+                    <StackPanel>
+                        <TextBlock Text="LEAVE ALONE" Style="{StaticResource CardTitle}"/>
+                        <Button x:Name="BtnExcluded" Content="Excluded Apps" Tag="&#xE72E;" Style="{StaticResource SkyButton}" HorizontalContentAlignment="Left" Margin="0,0,0,7"
+                                ToolTip="Show apps excluded from Upgrade All (winget pins)"/>
+                        <Button x:Name="BtnExcludeSelected" Content="Exclude Selected" Tag="&#xE72E;" HorizontalContentAlignment="Left" Margin="0,0,0,7"
+                                ToolTip="Stop Upgrade All (and -UpgradeAll mode) from upgrading the selected app(s)"/>
+                        <Button x:Name="BtnRemoveExclusion" Content="Remove Exclusion" Tag="&#xE785;" HorizontalContentAlignment="Left" Margin="0,0,0,7"
+                                ToolTip="Let Upgrade All upgrade the selected app(s) again"/>
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource CardBox}" Padding="12,10,12,4" Margin="0,0,0,0">
+                    <StackPanel>
+                        <TextBlock Text="TOOLS" Style="{StaticResource CardTitle}"/>
+                        <Button x:Name="BtnExport" Content="Export List..." Tag="&#xE74E;" Style="{StaticResource LilacButton}" HorizontalContentAlignment="Left" Margin="0,0,0,7"
+                                ToolTip="Save a list of installed apps to a file (winget export)"/>
+                        <Button x:Name="BtnImport" Content="Import List..." Tag="&#xE8E5;" Style="{StaticResource LilacButton}" HorizontalContentAlignment="Left" Margin="0,0,0,7"
+                                ToolTip="Install every app in a list saved with Export List (winget import)"/>
+                        <Button x:Name="BtnResetSources" Content="Reset Sources" Tag="&#xE895;" Style="{StaticResource LilacButton}" HorizontalContentAlignment="Left" Margin="0,0,0,7"
+                                ToolTip="Reset winget's sources when searches keep failing"/>
+                        <Button x:Name="BtnDiagnose" Content="Diagnose Network" Tag="&#xE9D9;" Style="{StaticResource LilacButton}" HorizontalContentAlignment="Left" Margin="0,0,0,7"
+                                ToolTip="Check whether winget can reach its servers"/>
+                    </StackPanel>
+                </Border>
             </StackPanel>
-        </Grid>
+        </ScrollViewer>
 
-        <!-- Row 1: search, export/import, tools -->
-        <WrapPanel Grid.Row="1" Orientation="Horizontal">
-            <TextBox x:Name="TxtSearchQuery" Width="200" Height="26" Margin="0,0,6,6" VerticalContentAlignment="Center"
-                     ToolTip="Type a name (e.g. 'notepad++') then press Enter or click Search"/>
-            <Button x:Name="BtnSearch" Content="Search"/>
-            <Button x:Name="BtnInstallSelected" Content="Install Selected"
-                    ToolTip="Install the selected search result(s). Ctrl+click or Shift+click to select several."/>
-            <Border Style="{StaticResource Divider}"/>
-            <Button x:Name="BtnExport" Content="Export List..." ToolTip="Save a list of installed apps to a file (winget export)"/>
-            <Button x:Name="BtnImport" Content="Import List..." ToolTip="Install every app in a list saved with Export List (winget import)"/>
-            <Border Style="{StaticResource Divider}"/>
-            <Button x:Name="BtnSaveLog" Content="Save Log..." ToolTip="Save the log below to a text file"/>
-            <Button x:Name="BtnResetSources" Content="Reset Sources"/>
-            <Button x:Name="BtnDiagnose" Content="Diagnose Network"/>
-        </WrapPanel>
+        <!-- Main area -->
+        <Grid Grid.Row="1" Grid.Column="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*" MinHeight="160"/>
+                <RowDefinition Height="8"/>
+                <RowDefinition x:Name="LogRow" Height="380" MinHeight="120"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
 
-        <!-- Row 2: current view, options, filter -->
-        <Grid Grid.Row="2" Margin="0,2,0,6">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="Auto"/>
-            </Grid.ColumnDefinitions>
-            <TextBlock x:Name="TxtView" Grid.Column="0" FontWeight="SemiBold" FontSize="14" VerticalAlignment="Center" Margin="0,0,16,0" Text="Updates available"/>
-            <WrapPanel Grid.Column="1" VerticalAlignment="Center">
-                <CheckBox x:Name="ChkIncludeUnknown" Content="Include unknown versions" Margin="0,2,14,2" IsChecked="True"/>
-                <CheckBox x:Name="ChkSkipStore" Content="Skip Microsoft Store (msstore) source" Margin="0,2,14,2" IsChecked="True"/>
-                <CheckBox x:Name="ChkRemoveDesktopIcons" Content="Remove new desktop icons after install/upgrade" Margin="0,2,14,2" IsChecked="True"/>
-            </WrapPanel>
-            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                <TextBlock Text="Filter:" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                <TextBox x:Name="TxtFilter" Width="200" Height="26" VerticalContentAlignment="Center"
-                         ToolTip="Show only rows whose name or Id contains this text. Doesn't affect Upgrade All."/>
-                <Button x:Name="BtnClearFilter" Content="X" MinWidth="26" Width="26" Height="26" Padding="0" Margin="4,0,0,0" ToolTip="Clear filter"/>
-            </StackPanel>
-        </Grid>
+            <!-- Current view, options, filter -->
+            <Grid Grid.Row="0" Margin="0,0,0,10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <Border Grid.Column="0" CornerRadius="14" Background="#2B2340" Padding="14,6" Margin="0,0,16,0" VerticalAlignment="Center">
+                    <TextBlock x:Name="TxtView" FontWeight="Bold" FontSize="14" Foreground="#FFFFFF" Text="Updates available"/>
+                </Border>
+                <WrapPanel Grid.Column="1" VerticalAlignment="Center">
+                    <CheckBox x:Name="ChkIncludeUnknown" Content="Include unknown versions" Margin="0,3,16,3" IsChecked="True"/>
+                    <CheckBox x:Name="ChkSkipStore" Content="Skip Microsoft Store source" Margin="0,3,16,3" IsChecked="True"
+                              ToolTip="Only use the winget source, skipping the Microsoft Store (msstore) source"/>
+                    <CheckBox x:Name="ChkRemoveDesktopIcons" Content="Tidy up new desktop icons" Margin="0,3,16,3" IsChecked="True"
+                              ToolTip="Remove desktop icons that installs and upgrades create"/>
+                </WrapPanel>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="&#xE71C;" FontFamily="Segoe MDL2 Assets" FontSize="14" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="#5E5672"/>
+                    <TextBox x:Name="TxtFilter" Width="200" Style="{StaticResource PillBox}"
+                             ToolTip="Show only rows whose name or Id contains this text. Doesn't affect Upgrade All."/>
+                    <Button x:Name="BtnClearFilter" Content="&#xE711;" FontFamily="Segoe MDL2 Assets" FontWeight="Normal"
+                            Width="34" MinWidth="34" Padding="0" Margin="6,0,0,0" ToolTip="Clear filter"/>
+                </StackPanel>
+            </Grid>
 
-        <!-- Row 3: package list + details pane -->
-        <Grid Grid.Row="3">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" MinWidth="300"/>
-                <ColumnDefinition Width="6"/>
-                <ColumnDefinition Width="340" MinWidth="200"/>
-            </Grid.ColumnDefinitions>
+            <!-- Package list + details pane -->
+            <Grid Grid.Row="1">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" MinWidth="300"/>
+                    <ColumnDefinition Width="10"/>
+                    <ColumnDefinition Width="320" MinWidth="200"/>
+                </Grid.ColumnDefinitions>
 
-            <DataGrid x:Name="Grid1" Grid.Column="0" AutoGenerateColumns="False" IsReadOnly="True"
-                      SelectionMode="Extended" SelectionUnit="FullRow" AlternatingRowBackground="#F3F3F3"
-                      CanUserAddRows="False" CanUserDeleteRows="False" GridLinesVisibility="Horizontal"
-                      HeadersVisibility="Column"
-                      ToolTip="Ctrl+click or Shift+click to select several. Double-click for details.">
-                <DataGrid.Columns>
-                    <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*"/>
-                    <DataGridTextColumn Header="Id" Binding="{Binding Id}" Width="2*"/>
-                    <DataGridTextColumn Header="Version" Binding="{Binding Version}" Width="1*"/>
-                    <DataGridTextColumn Header="Available" Binding="{Binding Available}" Width="1*"/>
-                    <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="1*"/>
-                </DataGrid.Columns>
-            </DataGrid>
+                <Border Grid.Column="0" Style="{StaticResource CardBox}" Padding="6">
+                    <Grid>
+                        <DataGrid x:Name="Grid1" AutoGenerateColumns="False" IsReadOnly="True"
+                                  SelectionMode="Extended" SelectionUnit="FullRow"
+                                  Background="#FFFFFF" RowBackground="#FFFFFF" AlternatingRowBackground="#FBF7F0"
+                                  BorderThickness="0" RowHeight="32" Foreground="#2B2340"
+                                  CanUserAddRows="False" CanUserDeleteRows="False" GridLinesVisibility="None"
+                                  HeadersVisibility="Column"
+                                  ToolTip="Ctrl+click or Shift+click to select several. Double-click for details.">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*"/>
+                                <DataGridTextColumn Header="Id" Binding="{Binding Id}" Width="2*"/>
+                                <DataGridTextColumn Header="Version" Binding="{Binding Version}" Width="1*"/>
+                                <DataGridTextColumn Header="Available" Binding="{Binding Available}" Width="1*"/>
+                                <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="1*"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                        <StackPanel x:Name="PnlEmpty" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"
+                                    IsHitTestVisible="False">
+                            <Image x:Name="ImgEmpty" Width="96" Height="96" RenderOptions.BitmapScalingMode="HighQuality"/>
+                            <TextBlock x:Name="TxtEmpty" FontSize="15" FontWeight="SemiBold" Foreground="#5E5672"
+                                       HorizontalAlignment="Center" TextAlignment="Center" Margin="0,8,0,0"/>
+                        </StackPanel>
+                    </Grid>
+                </Border>
 
-            <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Stretch" Background="Transparent"/>
+                <GridSplitter Grid.Column="1" Width="10" HorizontalAlignment="Stretch" Background="Transparent"/>
 
-            <Border Grid.Column="2" BorderBrush="#D0D0D0" BorderThickness="1" Padding="10">
+                <Border Grid.Column="2" Style="{StaticResource CardBox}" Padding="14,12,6,4">
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Top" Text="DETAILS" Style="{StaticResource CardTitle}"/>
+                        <WrapPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
+                            <Button x:Name="BtnDetails" Content="Show Details" Tag="&#xE946;" Style="{StaticResource SkyButton}"
+                                    ToolTip="Show details for the selected package (or double-click it)"/>
+                            <Button x:Name="BtnHomepage" Content="Homepage" Tag="&#xE8A7;" IsEnabled="False"/>
+                            <Button x:Name="BtnReleaseNotes" Content="Release Notes" Tag="&#xE8A7;" IsEnabled="False"/>
+                        </WrapPanel>
+                        <TextBox x:Name="TxtDetails" IsReadOnly="True" TextWrapping="Wrap" BorderThickness="0" Background="Transparent"
+                                 VerticalScrollBarVisibility="Auto" Foreground="#2B2340" Margin="0,0,8,0"
+                                 Text="Pick a package and click Show Details (or just double-click it) to see who makes it, what it does and where to find out more."/>
+                    </DockPanel>
+                </Border>
+            </Grid>
+
+            <GridSplitter Grid.Row="2" Height="8" HorizontalAlignment="Stretch" VerticalAlignment="Center"
+                          ResizeDirection="Rows" ResizeBehavior="PreviousAndNext" Background="Transparent"/>
+
+            <!-- Log -->
+            <Border Grid.Row="3" CornerRadius="16" Background="#2B2340" Padding="12,8,4,4" BorderBrush="#2B2340" BorderThickness="1.5">
                 <DockPanel>
-                    <TextBlock DockPanel.Dock="Top" Text="Details" FontWeight="SemiBold" FontSize="14" Margin="0,0,0,6"/>
-                    <WrapPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
-                        <Button x:Name="BtnDetails" Content="Show Details" ToolTip="Show details for the selected package (or double-click it)"/>
-                        <Button x:Name="BtnHomepage" Content="Homepage" IsEnabled="False"/>
-                        <Button x:Name="BtnReleaseNotes" Content="Release Notes" IsEnabled="False"/>
-                    </WrapPanel>
-                    <TextBox x:Name="TxtDetails" IsReadOnly="True" TextWrapping="Wrap" BorderThickness="0"
-                             VerticalScrollBarVisibility="Auto" FontFamily="Segoe UI" Foreground="#333333"
-                             Text="Select a package and click Show Details (or double-click it) to see its publisher, description and links."/>
+                    <Grid DockPanel.Dock="Top" Margin="2,0,8,6">
+                        <TextBlock Text="WHAT'S HAPPENING" FontSize="11" FontWeight="Bold" Foreground="#9D93C0" VerticalAlignment="Center"/>
+                        <Button x:Name="BtnSaveLog" Content="Save Log..." Tag="&#xE74E;" Style="{StaticResource LilacButton}"
+                                HorizontalAlignment="Right" Height="28" Margin="0" BorderBrush="#EEE8FF"
+                                ToolTip="Save this log to a text file"/>
+                    </Grid>
+                    <TextBox x:Name="TxtLog" FontFamily="Consolas" FontSize="12"
+                             VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                             IsReadOnly="True" TextWrapping="NoWrap" Background="#2B2340" Foreground="#EDE8FF" BorderThickness="0"/>
                 </DockPanel>
             </Border>
+
+            <!-- Status, progress and Cancel -->
+            <Grid Grid.Row="4" Margin="2,12,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="TxtStatus" Grid.Column="0" Text="Hi! Getting ready..." FontWeight="SemiBold" Foreground="#5E5672"
+                           VerticalAlignment="Center" Margin="0,0,16,0"/>
+                <ProgressBar x:Name="Progress" Grid.Column="1" Height="8" IsIndeterminate="False" Visibility="Collapsed"
+                             Foreground="#7BE0A0" Background="#EADFCB" BorderThickness="0" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                <Button x:Name="BtnCancel" Grid.Column="2" Content="Cancel" Tag="&#xE711;" Style="{StaticResource SunButton}" IsEnabled="False"
+                        Margin="0" ToolTip="Stop the current operation and skip anything still queued"/>
+            </Grid>
         </Grid>
-
-        <GridSplitter Grid.Row="4" Height="6" HorizontalAlignment="Stretch" VerticalAlignment="Center"
-                      ResizeDirection="Rows" ResizeBehavior="PreviousAndNext" Background="Transparent"/>
-
-        <TextBox x:Name="TxtLog" Grid.Row="5" FontFamily="Consolas" FontSize="12"
-                 VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
-                 IsReadOnly="True" TextWrapping="NoWrap" Background="#111111" Foreground="#DDDDDD"/>
-
-        <StackPanel Grid.Row="6" Margin="0,6,0,0">
-            <TextBlock x:Name="TxtStatus" Text="Ready." FontStyle="Italic"/>
-            <ProgressBar x:Name="Progress" Height="6" Margin="0,6,0,0" IsIndeterminate="False" Visibility="Collapsed"/>
-        </StackPanel>
     </Grid>
 </Window>
 '@
@@ -697,6 +931,215 @@ $txtLog               = $window.FindName('TxtLog')
 $txtStatus            = $window.FindName('TxtStatus')
 $progress             = $window.FindName('Progress')
 $logRow               = $window.FindName('LogRow')
+$imgLogo              = $window.FindName('ImgLogo')
+$txtGreeting          = $window.FindName('TxtGreeting')
+$pnlEmpty             = $window.FindName('PnlEmpty')
+$imgEmpty             = $window.FindName('ImgEmpty')
+$txtEmpty             = $window.FindName('TxtEmpty')
+
+# ---------------------------------------------------------------------------
+# The box mascot, embedded so the header and empty-list picture work even
+# without any image files next to the script (or inside the compiled .exe).
+# ---------------------------------------------------------------------------
+$script:MascotPng = @'
+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
+'@
+
+try {
+    $bytes  = [Convert]::FromBase64String(($script:MascotPng -replace '\s', ''))
+    $stream = New-Object System.IO.MemoryStream(,$bytes)
+    $mascot = New-Object System.Windows.Media.Imaging.BitmapImage
+    $mascot.BeginInit()
+    $mascot.CacheOption  = [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad
+    $mascot.StreamSource = $stream
+    $mascot.EndInit()
+    $mascot.Freeze()
+    $imgLogo.Source  = $mascot
+    $imgEmpty.Source = $mascot
+} catch {
+    # Cosmetic only.
+    $imgLogo.Visibility = 'Collapsed'
+}
+
+# A little hello that depends on the time of day.
+$hour = (Get-Date).Hour
+$txtGreeting.Text = if ($hour -lt 12) { 'Good morning! Let''s keep your apps fresh - no terminal needed.' }
+                    elseif ($hour -lt 18) { 'Good afternoon! Let''s keep your apps fresh - no terminal needed.' }
+                    else { 'Good evening! Let''s keep your apps fresh - no terminal needed.' }
 
 # ---------------------------------------------------------------------------
 # State shared between the UI thread and the poll timer
@@ -756,7 +1199,7 @@ $script:settingsPath = Join-Path $env:APPDATA 'WingetUpdateManager\settings.json
 # Bump when the default layout changes, so sizes saved with an older layout are
 # ignored once instead of squashing the new one (e.g. a short window saved before
 # the log pane was made taller).
-$script:layoutVersion = 2
+$script:layoutVersion = 4
 
 function Import-AppSettings {
     try {
@@ -900,6 +1343,20 @@ function Set-GridItems {
     $dataGrid.ItemsSource = $script:gridRows
     Update-GridFilter
     Update-ActionButtons
+
+    # A friendly message instead of an empty white box.
+    if ($script:gridRows.Count -eq 0) {
+        $txtEmpty.Text = switch ($Mode) {
+            'updates'   { "You're all up to date. Nice!`nNothing needs updating right now." }
+            'search'    { "Couldn't find anything with that name.`nTry a shorter or different search." }
+            'installed' { "No installed apps were found." }
+            'pins'      { "No apps are excluded.`nUpgrade All will update everything." }
+            default     { 'Nothing to show.' }
+        }
+        $pnlEmpty.Visibility = 'Visible'
+    } else {
+        $pnlEmpty.Visibility = 'Collapsed'
+    }
 }
 
 function Update-ActionButtons {
@@ -1019,7 +1476,7 @@ function Start-CheckForUpdates {
     # so the log pane can show it) can misbehave in ways that don't show up when you run
     # the same command directly in a normal terminal window.
     Start-WingetOperation -Arguments "upgrade $extra $src --accept-source-agreements --disable-interactivity" `
-        -Mode 'check' -StatusText 'Checking for updates...' -KeepLog:$KeepLog
+        -Mode 'check' -StatusText 'Looking for updates...' -KeepLog:$KeepLog
 }
 
 function Start-ListInstalled {
@@ -1475,11 +1932,11 @@ function Complete-Cancel {
         }
         'details' {
             $txtDetails.Text = 'Cancelled.'
-            Set-UiBusy -Busy $false -Status 'Cancelled.'
+            Set-UiBusy -Busy $false -Status 'Stopped. No worries.'
         }
         default {
             Append-Log "`r`n----- Cancelled -----`r`n"
-            Set-UiBusy -Busy $false -Status 'Cancelled.'
+            Set-UiBusy -Busy $false -Status 'Stopped. No worries.'
         }
     }
 }
@@ -1541,25 +1998,25 @@ $timer.Add_Tick({
                 $rows = @(ConvertFrom-WingetUpgradeTable -Lines $lines)
                 $script:lastUpdateRows = $rows
                 Set-GridItems -Rows $rows -Mode 'updates'
-                Set-UiBusy -Busy $false -Status "$($rows.Count) update(s) available."
+                Set-UiBusy -Busy $false -Status $(if ($rows.Count -eq 0) { "All up to date - nothing to do!" } elseif ($rows.Count -eq 1) { '1 update ready to install.' } else { "$($rows.Count) updates ready to install." })
                 Append-Log "`r`n$($rows.Count) update(s) available.`r`n"
             }
             'search' {
                 $rows = @(ConvertFrom-WingetUpgradeTable -Lines $lines)
                 Set-GridItems -Rows $rows -Mode 'search'
-                Set-UiBusy -Busy $false -Status "$($rows.Count) result(s) for '$($txtSearchQuery.Text.Trim())'."
+                Set-UiBusy -Busy $false -Status $(if ($rows.Count -eq 0) { "No luck finding '$($txtSearchQuery.Text.Trim())'." } else { "Found $($rows.Count) match(es) for '$($txtSearchQuery.Text.Trim())' - pick some and click Install Selected." })
                 Append-Log "`r`n$($rows.Count) result(s) found. Select one or more (Ctrl+click / Shift+click) and click 'Install Selected' to install them.`r`n"
             }
             'installed' {
                 $rows = @(ConvertFrom-WingetUpgradeTable -Lines $lines)
                 Set-GridItems -Rows $rows -Mode 'installed'
-                Set-UiBusy -Busy $false -Status "$($rows.Count) installed app(s)."
+                Set-UiBusy -Busy $false -Status "$($rows.Count) apps installed on this PC."
                 Append-Log "`r`n$($rows.Count) installed app(s) listed.`r`n"
             }
             'pins' {
                 $rows = @(ConvertFrom-WingetUpgradeTable -Lines $lines)
                 Set-GridItems -Rows $rows -Mode 'pins'
-                Set-UiBusy -Busy $false -Status "$($rows.Count) excluded app(s)."
+                Set-UiBusy -Busy $false -Status $(if ($rows.Count -eq 0) { 'No apps excluded - Upgrade All updates everything.' } else { "$($rows.Count) app(s) left alone by Upgrade All." })
                 Append-Log "`r`n$($rows.Count) app(s) excluded from Upgrade All.`r`n"
             }
             'details' {
@@ -1595,7 +2052,7 @@ $timer.Add_Tick({
                 Start-CheckForUpdates -KeepLog
             }
             'diagnose' {
-                Set-UiBusy -Busy $false -Status 'Diagnostics complete.'
+                Set-UiBusy -Busy $false -Status 'Network check done - see the results below.'
             }
         }
     }
@@ -1778,27 +2235,137 @@ $txtSearchQuery.Add_KeyDown({
     if ($e.Key -eq 'Return') { Start-SearchSoftware -Query $txtSearchQuery.Text }
 })
 
+# ---------------------------------------------------------------------------
+# About window - same look as the main window. It shares the main window's
+# styles (merged in after loading, so they're referenced with DynamicResource),
+# so the two can't drift apart.
+# ---------------------------------------------------------------------------
+$script:AboutWhatsNew = [ordered]@{
+    $script:AppVersion = @(
+        'A friendlier look: a header with the box mascot and a greeting',
+        'All the actions in a sidebar of rounded, colour-coded cards',
+        'Cheerier messages, and a note from the mascot when a list is empty'
+    )
+    '1.13.0' = @(
+        'Installed Apps view with Uninstall Selected',
+        'Exclude apps from Upgrade All (Excluded Apps view)',
+        'Cancel button for long operations',
+        'Export / Import app lists',
+        'Filter box, Details pane and Save Log',
+        'Remembers your settings and window size',
+        '-UpgradeAll command-line mode for Task Scheduler / Intune'
+    )
+}
+
+function Show-AboutWindow {
+    [xml]$aboutXaml = @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="About Winget Update Manager" Width="560" SizeToContent="Height" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="#FFF7EA" FontFamily="Segoe UI" FontSize="13" Foreground="#2B2340">
+    <StackPanel Margin="16">
+        <Border CornerRadius="20" Padding="16,12" BorderBrush="#2B2340" BorderThickness="1.5">
+            <Border.Background>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                    <GradientStop Color="#3FA4EE" Offset="0"/>
+                    <GradientStop Color="#5B6CF0" Offset="1"/>
+                </LinearGradientBrush>
+            </Border.Background>
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Image x:Name="AboutLogo" Width="76" Height="76" Margin="0,0,14,0" RenderOptions.BitmapScalingMode="HighQuality"/>
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock Text="Winget Update Manager" FontSize="22" FontWeight="Bold" Foreground="#FFFFFF"/>
+                    <Border CornerRadius="10" Background="#2B2340" Padding="10,3" Margin="0,6,0,0" HorizontalAlignment="Left">
+                        <TextBlock x:Name="AboutVersion" Foreground="#FFFFFF" FontWeight="SemiBold"/>
+                    </Border>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Border Style="{DynamicResource CardBox}" Padding="16,14" Margin="0,14,0,0">
+            <StackPanel>
+                <TextBlock Text="WHAT IT DOES" Style="{DynamicResource CardTitle}"/>
+                <TextBlock TextWrapping="Wrap" LineHeight="20">
+                    A friendly front end for winget, the Windows Package Manager. Check for updates and
+                    upgrade one app, several or everything at once; find and install new software; see and
+                    uninstall what's installed; keep chosen apps out of bulk upgrades; and copy a set of apps
+                    to another PC. It can also run unattended with -UpgradeAll for Task Scheduler or Intune.
+                </TextBlock>
+            </StackPanel>
+        </Border>
+
+        <Border Style="{DynamicResource CardBox}" Padding="16,14" Margin="0,12,0,0">
+            <StackPanel x:Name="AboutNew"/>
+        </Border>
+
+        <Grid Margin="2,14,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock x:Name="AboutFooter" Grid.Column="0" Foreground="#5E5672" VerticalAlignment="Center" TextWrapping="Wrap"/>
+            <Button x:Name="AboutClose" Grid.Column="1" Content="Close" Tag="&#xE73E;" Style="{DynamicResource MintButton}"
+                    Margin="12,0,0,0" IsDefault="True" IsCancel="True"/>
+        </Grid>
+    </StackPanel>
+</Window>
+'@
+
+    $about = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $aboutXaml))
+    # Share the main window's styles (buttons, cards, titles).
+    $about.Resources.MergedDictionaries.Add($window.Resources)
+    $about.Owner = $window
+    if ($window.Icon) { $about.Icon = $window.Icon }
+
+    $about.FindName('AboutLogo').Source   = $imgLogo.Source
+    $about.FindName('AboutVersion').Text  = "Version $script:AppVersion"
+
+    $wingetVersion = try { (& $script:WingetExe --version | Select-Object -First 1) } catch { 'unknown' }
+    $about.FindName('AboutFooter').Text = "winget $wingetVersion  -  running as Administrator"
+
+    # "What's new" lists, newest first.
+    $panel  = $about.FindName('AboutNew')
+    $bullet = [string][char]0x2022
+    $first  = $true
+    foreach ($version in $script:AboutWhatsNew.Keys) {
+        $title = New-Object System.Windows.Controls.TextBlock
+        $title.Text = if ($first) { "WHAT'S NEW IN $version" } else { "ALSO NEW IN $version" }
+        $title.Style = $about.FindResource('CardTitle')
+        if (-not $first) { $title.Margin = New-Object System.Windows.Thickness(2, 12, 0, 6) }
+        [void]$panel.Children.Add($title)
+
+        foreach ($line in $script:AboutWhatsNew[$version]) {
+            $row = New-Object System.Windows.Controls.TextBlock
+            $row.Text = "$bullet  $line"
+            $row.TextWrapping = 'Wrap'
+            $row.Margin = New-Object System.Windows.Thickness(4, 0, 0, 4)
+            [void]$panel.Children.Add($row)
+        }
+        $first = $false
+    }
+
+    $about.FindName('AboutClose').Add_Click({ $about.Close() }.GetNewClosure())
+    [void]$about.ShowDialog()
+}
+
 $btnAbout.Add_Click({
-    $wingetVersion = try { (& $script:WingetExe --version) } catch { 'unknown' }
-    [System.Windows.MessageBox]::Show(
-        "Winget Update Manager`r`n" +
-        "Version $script:AppVersion`r`n`r`n" +
-        "A simple GUI front end for winget (Windows Package Manager).`r`n`r`n" +
-        "Checks for updates and upgrades selected packages or everything at once; searches " +
-        "for and installs new software; lists and uninstalls installed apps; excludes apps " +
-        "from Upgrade All; exports and imports app lists; and includes tools to reset " +
-        "winget's sources and diagnose network issues. Can also run unattended with " +
-        "-UpgradeAll (see README). Runs elevated (as Administrator) automatically.`r`n`r`n" +
-        "New in $($script:AppVersion):`r`n" +
-        "  - Installed Apps view with Uninstall Selected`r`n" +
-        "  - Exclude apps from Upgrade All (Excluded Apps view)`r`n" +
-        "  - Cancel button for long operations`r`n" +
-        "  - Export / Import app lists`r`n" +
-        "  - Filter box, Details pane and Save Log`r`n" +
-        "  - Remembers your settings and window size`r`n" +
-        "  - -UpgradeAll command-line mode for Task Scheduler / Intune`r`n`r`n" +
-        "Detected winget version: $wingetVersion",
-        "About Winget Update Manager", 'OK', 'Information') | Out-Null
+    try {
+        Show-AboutWindow
+    } catch {
+        # Never leave the About button doing nothing: fall back to a plain box.
+        $wingetVersion = try { (& $script:WingetExe --version | Select-Object -First 1) } catch { 'unknown' }
+        [System.Windows.MessageBox]::Show(
+            "Winget Update Manager`r`nVersion $script:AppVersion`r`n`r`n" +
+            "A friendly front end for winget (Windows Package Manager).`r`n`r`n" +
+            "winget $wingetVersion`r`n`r`n" +
+            "(The styled About window couldn't open: $($_.Exception.Message))",
+            'About Winget Update Manager', 'OK', 'Information') | Out-Null
+    }
 })
 
 # Exit button and the window's own close (X) button go through the same check.

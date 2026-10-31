@@ -2,6 +2,27 @@
 
 All notable changes to this project are documented here.
 
+## [1.14.0] - 2026-10-31
+### Changed
+- A friendlier, less formal look to match the new mascot:
+  - A blue header with the box mascot and a time-of-day greeting, with About and Exit in it.
+  - All the actions moved into a sidebar of rounded cards (Updates, Find New Apps, Installed
+    Apps, Leave Alone, Tools), so the package list and log keep their height.
+  - Rounded, colour-coded buttons with small icons: blue to show a list, green to install or
+    upgrade, pink to uninstall, yellow to cancel.
+  - Softer colours throughout: a cream background, white cards, a lilac list header and a
+    deep-purple log panel ("What's happening").
+  - Save Log moved to the log panel, and Cancel sits next to the progress bar.
+- **About** is now its own window in the same style (mascot header, version badge, a
+  "What it does" card and "What's new" lists) instead of a plain message box.
+- Friendlier messages, e.g. "All up to date - nothing to do!", and a picture of the mascot with
+  a short note when a list is empty instead of a blank box.
+- The mascot is embedded in the script, so the header works without any image files and inside
+  the compiled exe.
+- The window opens taller (1120 instead of 980) so the whole sidebar fits without scrolling;
+  smaller screens still get a window shrunk to fit. Window and log sizes saved by older
+  versions are ignored once, because the layout changed.
+
 ## [1.13.0] - 2026-10-30
 ### Added
 - **Installed Apps** view (`winget list`), including apps that didn't come from winget, with

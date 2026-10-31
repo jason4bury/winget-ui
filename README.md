@@ -10,6 +10,9 @@ A small PowerShell + WPF front end for [winget](https://learn.microsoft.com/en-u
 
 ## Features
 
+A friendly window with a sidebar of colour-coded buttons, a list of packages in the middle, a details pane on the right and a live log underneath.
+
+
 - On launch, automatically runs `winget upgrade` and lists what's outdated in a sortable grid (Name, Id, Version, Available, Source).
 - **Search** — type a name and search winget's sources (`winget search`), then **Install Selected** to install whatever you pick from the results (one package or several), with the same confirmation prompt and live log output as an upgrade.
 - **Upgrade All** — runs `winget upgrade --all` with a confirmation prompt, streaming live output into a log pane.
