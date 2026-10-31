@@ -2,6 +2,22 @@
 
 All notable changes to this project are documented here.
 
+## [1.15.0] - 2026-10-31
+### Added
+- **Progress card**: while winget is working, a card over the list shows what's happening
+  (e.g. "Upgrading Google Chrome..."), a progress bar, how long it's been running and a Cancel
+  button. When several packages are being installed, upgraded or uninstalled, the bar fills
+  step by step ("Package 2 of 5"); Upgrade All and Import do the same by following winget's
+  "(2/5) Found ..." lines.
+
+### Fixed
+- **No more command prompt windows.** In the compiled exe, every winget run opened its own
+  console window, because the exe has no console to share. winget (and the network check,
+  version check and the command that stops a cancelled install) now run with no window at all,
+  with their output still shown in the log. This also applies to `-UpgradeAll` mode.
+- Diagnose Network now runs its checks from a temporary script file instead of a very long
+  encoded command line.
+
 ## [1.14.0] - 2026-10-31
 ### Changed
 - A friendlier, less formal look to match the new mascot:

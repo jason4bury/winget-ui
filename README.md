@@ -24,6 +24,7 @@ A friendly window with a sidebar of colour-coded buttons, a list of packages in 
 - **Filter** — type in the filter box to narrow the current list by name or Id. It only affects what's shown; **Upgrade All** still upgrades everything.
 - **Details pane** — select a package and click **Show Details** (or double-click it) to see its publisher, description, licence and links (`winget show`), with buttons to open its homepage and release notes.
 - **Save Log** — saves the log pane to a text file, e.g. to attach to a ticket.
+- **Progress card** — while winget works, a card over the list shows what's happening, a progress bar (filling step by step when several packages are queued), the time taken and a Cancel button. winget runs with no command prompt window popping up.
 - Remembers the checkbox settings, the window's size and position, and the log pane's height between runs (in `%APPDATA%\WingetUpdateManager\settings.json`).
 - **Multi-select** — Ctrl+click or Shift+click to select several packages in the list; the **Selected** buttons (install, upgrade, uninstall, exclude) then process them one after another, with a separate log section for each and a summary at the end showing which succeeded. The buttons show how many are selected, e.g. "Install Selected (3)".
 - **Reset Sources** — runs `winget source reset --force` followed by `winget source update`, for when package searches start failing.

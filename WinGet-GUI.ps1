@@ -55,7 +55,7 @@ param(
 )
 
 # Bump this whenever you ship a change worth noting in CHANGELOG.md.
-$script:AppVersion = '1.14.0'
+$script:AppVersion = '1.15.0'
 
 $script:cliMode = [bool]$UpgradeAll
 $script:showConsole = $script:cliMode -and -not $Silent
@@ -379,6 +379,48 @@ function Remove-NewDesktopShortcuts {
     }
 }
 
+function Start-HiddenProcess {
+    <#
+      Starts a console program with no window and its output sent to files.
+      Start-Process -NoNewWindow only avoids a new window when there's already a
+      console to share; the compiled .exe has none, so Windows would pop up a
+      command prompt window for every winget run. CreateNoWindow stops that, and
+      cmd.exe does the redirection to the files the log pane reads from.
+    #>
+    param([string]$FilePath, [string]$Arguments, [string]$OutFile, [string]$ErrFile, [string]$WorkingDirectory)
+
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName        = Join-Path $env:SystemRoot 'System32\cmd.exe'
+    # /s + the outer quotes keep cmd from mangling the quoted parts inside.
+    $psi.Arguments       = '/d /s /c ""{0}" {1} 1>"{2}" 2>"{3}""' -f $FilePath, $Arguments, $OutFile, $ErrFile
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow  = $true
+    $psi.WindowStyle     = [System.Diagnostics.ProcessWindowStyle]::Hidden
+    if ($WorkingDirectory) { $psi.WorkingDirectory = $WorkingDirectory }
+    return [System.Diagnostics.Process]::Start($psi)
+}
+
+function Invoke-HiddenCapture {
+    # Runs a console program hidden, waits for it and returns its text output.
+    param([string]$FilePath, [string]$Arguments, [int]$TimeoutMs = 20000)
+    $out = [System.IO.Path]::GetTempFileName()
+    $err = [System.IO.Path]::GetTempFileName()
+    try {
+        $p = Start-HiddenProcess -FilePath $FilePath -Arguments $Arguments -OutFile $out -ErrFile $err
+        [void]$p.WaitForExit($TimeoutMs)
+        return [string](Read-OutputFile -Path $out)
+    } catch {
+        return ''
+    } finally {
+        Remove-Item -LiteralPath $out, $err -ErrorAction SilentlyContinue
+    }
+}
+
+function Get-WingetVersion {
+    $v = ([string](Invoke-HiddenCapture -FilePath $script:WingetExe -Arguments '--version' -TimeoutMs 10000)).Trim()
+    if ($v) { return ($v -split "`r?`n")[0] } else { return 'unknown' }
+}
+
 function Stop-ProcessTree {
     # winget starts the actual installer as a child process, so kill the whole tree
     # rather than just winget itself, or the installer carries on in the background.
@@ -386,7 +428,12 @@ function Stop-ProcessTree {
     if (-not $Process) { return }
     try {
         if (-not $Process.HasExited) {
-            & taskkill.exe /PID $Process.Id /T /F 2>&1 | Out-Null
+            $kill = New-Object System.Diagnostics.ProcessStartInfo
+            $kill.FileName        = Join-Path $env:SystemRoot 'System32\taskkill.exe'
+            $kill.Arguments       = "/PID $($Process.Id) /T /F"
+            $kill.UseShellExecute = $false
+            $kill.CreateNoWindow  = $true
+            [void]([System.Diagnostics.Process]::Start($kill)).WaitForExit(10000)
         }
     } catch { }
 }
@@ -401,10 +448,8 @@ function Invoke-WingetCli {
     $err = [System.IO.Path]::GetTempFileName()
     Append-Log "> winget $Arguments`r`n"
     try {
-        $p = Start-Process -FilePath $script:WingetExe -ArgumentList $Arguments -NoNewWindow -PassThru `
-            -WorkingDirectory (Split-Path -Parent $script:WingetExe) `
-            -RedirectStandardOutput $out -RedirectStandardError $err
-        $null = $p.Handle
+        $p = Start-HiddenProcess -FilePath $script:WingetExe -Arguments $Arguments -OutFile $out -ErrFile $err `
+            -WorkingDirectory (Split-Path -Parent $script:WingetExe)
         $p.WaitForExit()
         $text = Read-OutputFile -Path $out
         $errText = Read-OutputFile -Path $err
@@ -829,6 +874,47 @@ if (-not $script:WingetExe) {
                                  Text="Pick a package and click Show Details (or just double-click it) to see who makes it, what it does and where to find out more."/>
                     </DockPanel>
                 </Border>
+
+                <!-- Progress card, shown over the list while winget is working -->
+                <Border x:Name="PnlBusy" Grid.ColumnSpan="3" Background="#D9FFF7EA" CornerRadius="16" Visibility="Collapsed">
+                    <Border Style="{StaticResource CardBox}" Padding="22,18,22,14" BorderBrush="#2B2340"
+                            HorizontalAlignment="Center" VerticalAlignment="Center" Width="460">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal">
+                                <Image x:Name="ImgBusy" Width="52" Height="52" Margin="0,0,14,0" RenderOptions.BitmapScalingMode="HighQuality">
+                                    <Image.RenderTransform>
+                                        <TranslateTransform/>
+                                    </Image.RenderTransform>
+                                    <Image.Triggers>
+                                        <EventTrigger RoutedEvent="FrameworkElement.Loaded">
+                                            <BeginStoryboard>
+                                                <Storyboard RepeatBehavior="Forever" AutoReverse="True">
+                                                    <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)"
+                                                                     From="0" To="-6" Duration="0:0:0.6">
+                                                        <DoubleAnimation.EasingFunction>
+                                                            <SineEase EasingMode="EaseInOut"/>
+                                                        </DoubleAnimation.EasingFunction>
+                                                    </DoubleAnimation>
+                                                </Storyboard>
+                                            </BeginStoryboard>
+                                        </EventTrigger>
+                                    </Image.Triggers>
+                                </Image>
+                                <StackPanel VerticalAlignment="Center" Width="350">
+                                    <TextBlock x:Name="TxtBusyTitle" FontSize="16" FontWeight="Bold" TextWrapping="Wrap" Text="Working..."/>
+                                    <TextBlock x:Name="TxtBusyDetail" Foreground="#5E5672" Margin="0,3,0,0" TextTrimming="CharacterEllipsis"/>
+                                </StackPanel>
+                            </StackPanel>
+                            <ProgressBar x:Name="BusyBar" Height="14" Margin="0,16,0,10" IsIndeterminate="True"
+                                         Foreground="#7BE0A0" Background="#F3ECDD" BorderBrush="#2B2340" BorderThickness="1"/>
+                            <Grid>
+                                <TextBlock x:Name="TxtBusyTime" Foreground="#8A80A0" VerticalAlignment="Center"/>
+                                <Button x:Name="BtnBusyCancel" Content="Cancel" Tag="&#xE711;" Style="{StaticResource SunButton}"
+                                        HorizontalAlignment="Right" Margin="0,0,0,4"/>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                </Border>
             </Grid>
 
             <GridSplitter Grid.Row="2" Height="8" HorizontalAlignment="Stretch" VerticalAlignment="Center"
@@ -936,6 +1022,15 @@ $txtGreeting          = $window.FindName('TxtGreeting')
 $pnlEmpty             = $window.FindName('PnlEmpty')
 $imgEmpty             = $window.FindName('ImgEmpty')
 $txtEmpty             = $window.FindName('TxtEmpty')
+$pnlBusy              = $window.FindName('PnlBusy')
+$imgBusy              = $window.FindName('ImgBusy')
+$txtBusyTitle         = $window.FindName('TxtBusyTitle')
+$txtBusyDetail        = $window.FindName('TxtBusyDetail')
+$busyBar              = $window.FindName('BusyBar')
+$txtBusyTime          = $window.FindName('TxtBusyTime')
+$btnBusyCancel        = $window.FindName('BtnBusyCancel')
+$script:busyStart     = $null
+$script:diagTemp      = $null
 
 # ---------------------------------------------------------------------------
 # The box mascot, embedded so the header and empty-list picture work even
@@ -1130,6 +1225,7 @@ try {
     $mascot.Freeze()
     $imgLogo.Source  = $mascot
     $imgEmpty.Source = $mascot
+    $imgBusy.Source  = $mascot
 } catch {
     # Cosmetic only.
     $imgLogo.Visibility = 'Collapsed'
@@ -1389,10 +1485,36 @@ function Set-UiBusy {
         $control.IsEnabled = -not $Busy
     }
     $btnCancel.IsEnabled      = $Busy
+    $btnBusyCancel.IsEnabled  = $Busy
     $progress.Visibility      = if ($Busy) { 'Visible' } else { 'Collapsed' }
     $progress.IsIndeterminate = $Busy
+
+    # The progress card over the list. Not for the quick Details lookup.
+    if ($Busy -and $script:mode -ne 'details') {
+        if ($pnlBusy.Visibility -ne 'Visible') {
+            $script:busyStart = Get-Date
+            $txtBusyTime.Text = ''
+        }
+        $pnlBusy.Visibility = 'Visible'
+    } else {
+        $pnlBusy.Visibility = 'Collapsed'
+    }
+
     Update-ActionButtons
     if ($Status) { $txtStatus.Text = $Status }
+}
+
+function Update-BusyCard {
+    param([string]$Title, [string]$Detail, $Percent = $null)
+    if ($Title) { $txtBusyTitle.Text = $Title }
+    $txtBusyDetail.Text       = $Detail
+    $txtBusyDetail.Visibility = if ($Detail) { 'Visible' } else { 'Collapsed' }
+    if ($null -eq $Percent) {
+        $busyBar.IsIndeterminate = $true
+    } else {
+        $busyBar.IsIndeterminate = $false
+        $busyBar.Value = [math]::Max(0, [math]::Min(100, [double]$Percent))
+    }
 }
 
 function Start-DesktopWatch {
@@ -1424,7 +1546,11 @@ function Start-WingetOperation {
         [switch]$KeepLog,
         # For lookups whose output goes somewhere else (the Details pane), so the log
         # pane isn't cluttered with it.
-        [switch]$NoLogStream
+        [switch]$NoLogStream,
+        # Shown on the progress card: a line under the title (e.g. "Package 2 of 5")
+        # and how full the bar is (0-100). No percentage = a moving "working" bar.
+        [string]$ProgressDetail = '',
+        $ProgressPercent = $null
     )
 
     $script:mode            = $Mode
@@ -1440,22 +1566,11 @@ function Start-WingetOperation {
         if ($LogPrefix) { Append-Log "$LogPrefix`r`n`r`n" } else { Append-Log "> winget $Arguments`r`n`r`n" }
     }
     Set-UiBusy -Busy $true -Status $StatusText
+    Update-BusyCard -Title $StatusText -Detail $ProgressDetail -Percent $ProgressPercent
 
-    $startParams = @{
-        FilePath               = $FilePath
-        ArgumentList           = $Arguments
-        NoNewWindow            = $true
-        PassThru               = $true
-        RedirectStandardOutput = $script:tempOut
-        RedirectStandardError  = $script:tempErr
-    }
-    if ($FilePath -eq $script:WingetExe) { $startParams.WorkingDirectory = Split-Path -Parent $script:WingetExe }
-    $script:proc = Start-Process @startParams
-
-    # Touching .Handle straight away makes .NET keep the process handle open, which is
-    # what lets ExitCode be read after the process has exited. Without it, ExitCode on a
-    # Start-Process -PassThru object often comes back empty.
-    $null = $script:proc.Handle
+    $workDir = if ($FilePath -eq $script:WingetExe) { Split-Path -Parent $script:WingetExe } else { $null }
+    $script:proc = Start-HiddenProcess -FilePath $FilePath -Arguments $Arguments `
+        -OutFile $script:tempOut -ErrFile $script:tempErr -WorkingDirectory $workDir
 
     $timer.Start()
 }
@@ -1659,11 +1774,13 @@ if ($problems.Count -eq 0) {
 }
 '@
 
-    $bytes   = [System.Text.Encoding]::Unicode.GetBytes($diagScript)
-    $encoded = [Convert]::ToBase64String($bytes)
+    # Written to a temp file rather than passed as -EncodedCommand, which would be too
+    # long for the cmd.exe line used to start it hidden.
+    $script:diagTemp = Join-Path ([System.IO.Path]::GetTempPath()) "winget-gui-diagnose-$PID.ps1"
+    [System.IO.File]::WriteAllText($script:diagTemp, $diagScript, (New-Object System.Text.UTF8Encoding($true)))
 
-    Start-WingetOperation -FilePath 'powershell.exe' `
-        -Arguments "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encoded" `
+    Start-WingetOperation -FilePath (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') `
+        -Arguments "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$($script:diagTemp)`"" `
         -Mode 'diagnose' -StatusText 'Running network diagnostics...' `
         -LogPrefix '> Running network diagnostics...'
 }
@@ -1839,8 +1956,11 @@ function Start-NextQueuedPackage {
         $prefix = "===== $verb$counter : $($item.Name) =====`r`n> winget $wingetArgs"
         if ($position -gt 1) { $prefix = "`r`n$prefix" }
 
+        $detail  = if ($script:queueTotal -gt 1) { "Package $position of $($script:queueTotal)" } else { $item.Id }
+        $percent = if ($script:queueTotal -gt 1) { (($position - 1) / $script:queueTotal) * 100 } else { $null }
         Start-WingetOperation -Arguments $wingetArgs -Mode 'queue' -KeepLog `
-            -StatusText "$verb$counter $($item.Name)..." -LogPrefix $prefix
+            -StatusText "$verb $($item.Name)..." -LogPrefix $prefix `
+            -ProgressDetail $detail -ProgressPercent $percent
         return
     }
 
@@ -1911,7 +2031,9 @@ function Request-Cancel {
     if (-not $script:proc -or $script:proc.HasExited) { return }
     $script:cancelRequested = $true
     $btnCancel.IsEnabled = $false
+    $btnBusyCancel.IsEnabled = $false
     $txtStatus.Text = 'Cancelling...'
+    Update-BusyCard -Title 'Stopping...' -Detail 'Ending winget and its installer'
     Stop-ProcessTree -Process $script:proc
 }
 
@@ -1955,6 +2077,31 @@ $desktopWatchTimer.Add_Tick({
 })
 
 $timer.Add_Tick({
+    if ($pnlBusy.Visibility -eq 'Visible' -and $script:busyStart) {
+        $elapsed = (Get-Date) - $script:busyStart
+        $txtBusyTime.Text = if ($elapsed.TotalMinutes -ge 1) {
+            'Working for {0}m {1:00}s' -f [math]::Floor($elapsed.TotalMinutes), $elapsed.Seconds
+        } else { 'Working for {0}s' -f [math]::Floor($elapsed.TotalSeconds) }
+    }
+
+    # Upgrade All and Import print "(2/5) Found Google Chrome [Google.Chrome] ..." as they
+    # go, which is enough to fill the bar step by step.
+    if ($script:mode -in @('upgradeAll', 'import')) {
+        $soFar = Read-OutputFile -Path $script:tempOut
+        if ($soFar) {
+            $steps = [regex]::Matches($soFar, '\((\d+)/(\d+)\)\s+Found\s+(.+?)\s+\[')
+            if ($steps.Count -gt 0) {
+                $last  = $steps[$steps.Count - 1]
+                $n     = [int]$last.Groups[1].Value
+                $total = [int]$last.Groups[2].Value
+                $verb  = if ($script:mode -eq 'import') { 'Installing' } else { 'Upgrading' }
+                if ($total -gt 0) {
+                    Update-BusyCard -Title "$verb $($last.Groups[3].Value)..." -Detail "Package $n of $total" -Percent ((($n - 1) / $total) * 100)
+                }
+            }
+        }
+    }
+
     if ($script:streamToLog) {
         $content = Read-OutputFile -Path $script:tempOut
         if ($content -and $content.Length -gt $script:lastOutLength) {
@@ -2052,6 +2199,7 @@ $timer.Add_Tick({
                 Start-CheckForUpdates -KeepLog
             }
             'diagnose' {
+                if ($script:diagTemp) { Remove-Item -LiteralPath $script:diagTemp -ErrorAction SilentlyContinue }
                 Set-UiBusy -Busy $false -Status 'Network check done - see the results below.'
             }
         }
@@ -2079,6 +2227,7 @@ $btnCheck.Add_Click({ Start-CheckForUpdates })
 $btnInstalled.Add_Click({ Start-ListInstalled })
 $btnExcluded.Add_Click({ Start-ListPins })
 $btnCancel.Add_Click({ Request-Cancel })
+$btnBusyCancel.Add_Click({ Request-Cancel })
 $btnDetails.Add_Click({ Show-PackageDetails })
 $btnHomepage.Add_Click({ Open-Url -Url $btnHomepage.Tag })
 $btnReleaseNotes.Add_Click({ Open-Url -Url $btnReleaseNotes.Tag })
@@ -2242,6 +2391,10 @@ $txtSearchQuery.Add_KeyDown({
 # ---------------------------------------------------------------------------
 $script:AboutWhatsNew = [ordered]@{
     $script:AppVersion = @(
+        'No more command prompt windows popping up while winget runs',
+        'A progress card showing what''s happening, how far along it is and how long it''s taken'
+    )
+    '1.14.0' = @(
         'A friendlier look: a header with the box mascot and a greeting',
         'All the actions in a sidebar of rounded, colour-coded cards',
         'Cheerier messages, and a note from the mascot when a list is empty'
@@ -2325,7 +2478,7 @@ function Show-AboutWindow {
     $about.FindName('AboutLogo').Source   = $imgLogo.Source
     $about.FindName('AboutVersion').Text  = "Version $script:AppVersion"
 
-    $wingetVersion = try { (& $script:WingetExe --version | Select-Object -First 1) } catch { 'unknown' }
+    $wingetVersion = Get-WingetVersion
     $about.FindName('AboutFooter').Text = "winget $wingetVersion  -  running as Administrator"
 
     # "What's new" lists, newest first.
@@ -2358,7 +2511,7 @@ $btnAbout.Add_Click({
         Show-AboutWindow
     } catch {
         # Never leave the About button doing nothing: fall back to a plain box.
-        $wingetVersion = try { (& $script:WingetExe --version | Select-Object -First 1) } catch { 'unknown' }
+        $wingetVersion = Get-WingetVersion
         [System.Windows.MessageBox]::Show(
             "Winget Update Manager`r`nVersion $script:AppVersion`r`n`r`n" +
             "A friendly front end for winget (Windows Package Manager).`r`n`r`n" +
