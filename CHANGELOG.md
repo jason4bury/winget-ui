@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here.
 
+## [1.15.1] - 2026-11-03
+### Changed
+- **Details pane tidied up.** Instead of winget's raw text run together, it now shows the app
+  name as a heading with its Id and a version badge, then neat label / value rows (Publisher,
+  Author, Licence, Copyright, Short name), the description as separate paragraphs under
+  "About", release notes under "What's new in this version" (trimmed if very long) and tags as
+  small pills.
+- The Homepage button falls back to the publisher's website when a package has no homepage.
+
 ## [1.15.0] - 2026-10-31
 ### Added
 - **Progress card**: while winget is working, a card over the list shows what's happening

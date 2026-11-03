@@ -55,7 +55,7 @@ param(
 )
 
 # Bump this whenever you ship a change worth noting in CHANGELOG.md.
-$script:AppVersion = '1.15.0'
+$script:AppVersion = '1.15.1'
 
 $script:cliMode = [bool]$UpgradeAll
 $script:showConsole = $script:cliMode -and -not $Silent
@@ -869,9 +869,12 @@ if (-not $script:WingetExe) {
                             <Button x:Name="BtnHomepage" Content="Homepage" Tag="&#xE8A7;" IsEnabled="False"/>
                             <Button x:Name="BtnReleaseNotes" Content="Release Notes" Tag="&#xE8A7;" IsEnabled="False"/>
                         </WrapPanel>
-                        <TextBox x:Name="TxtDetails" IsReadOnly="True" TextWrapping="Wrap" BorderThickness="0" Background="Transparent"
-                                 VerticalScrollBarVisibility="Auto" Foreground="#2B2340" Margin="0,0,8,0"
-                                 Text="Pick a package and click Show Details (or just double-click it) to see who makes it, what it does and where to find out more."/>
+                        <ScrollViewer x:Name="ScrDetails" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="0,0,0,0">
+                            <StackPanel x:Name="PnlDetails" Margin="0,0,10,0">
+                                <TextBlock x:Name="TxtDetails" TextWrapping="Wrap" Foreground="#5E5672" LineHeight="20"
+                                           Text="Pick a package and click Show Details (or just double-click it) to see who makes it, what it does and where to find out more."/>
+                            </StackPanel>
+                        </ScrollViewer>
                     </DockPanel>
                 </Border>
 
@@ -1013,6 +1016,8 @@ $btnDetails           = $window.FindName('BtnDetails')
 $btnHomepage          = $window.FindName('BtnHomepage')
 $btnReleaseNotes      = $window.FindName('BtnReleaseNotes')
 $txtDetails           = $window.FindName('TxtDetails')
+$pnlDetails           = $window.FindName('PnlDetails')
+$scrDetails           = $window.FindName('ScrDetails')
 $txtLog               = $window.FindName('TxtLog')
 $txtStatus            = $window.FindName('TxtStatus')
 $progress             = $window.FindName('Progress')
@@ -1803,14 +1808,69 @@ function Show-PackageDetails {
     $script:detailsItem = $item
     Set-DetailsLinks
     if (-not $item.Source) {
-        $txtDetails.Text = "$($item.Name)`r`n$($item.Id)`r`n`r`nThis app wasn't installed from a winget source, so winget has no details for it."
+        Show-DetailsMessage -Title $item.Name -Subtitle $item.Id -Message "This app wasn't installed from a winget source, so winget has no details for it."
         return
     }
 
-    $txtDetails.Text = "Loading details for $($item.Name)..."
+    Show-DetailsMessage -Title $item.Name -Subtitle $item.Id -Message 'Looking up the details...'
     $id = $item.Id
     Start-WingetOperation -Arguments "show --id `"$id`" -e --source `"$($item.Source)`" --accept-source-agreements --disable-interactivity" `
         -Mode 'details' -StatusText "Loading details for $($item.Name)..." -NoLogStream
+}
+
+function New-DetailsText {
+    # A wrapped TextBlock for the Details pane.
+    param([string]$Text, [double]$Size = 13, [string]$Weight = 'Normal', [string]$Color = '#2B2340',
+          [string]$Margin = '0,0,0,0')
+    $tb = New-Object System.Windows.Controls.TextBlock
+    $tb.Text         = $Text
+    $tb.TextWrapping = 'Wrap'
+    $tb.FontSize     = $Size
+    $tb.FontWeight   = $Weight
+    $tb.Foreground   = (New-Object System.Windows.Media.BrushConverter).ConvertFromString($Color)
+    $tb.Margin       = $Margin
+    $tb.LineHeight   = [math]::Round($Size * 1.45)
+    return $tb
+}
+
+function New-DetailsHeading {
+    param([string]$Text)
+    return New-DetailsText -Text $Text.ToUpper() -Size 11 -Weight 'Bold' -Color '#8A80A0' -Margin '0,14,0,6'
+}
+
+function Show-DetailsMessage {
+    # Simple state for the Details pane: a title, an optional subtitle and a message.
+    param([string]$Title, [string]$Subtitle, [string]$Message)
+    $pnlDetails.Children.Clear()
+    if ($Title)    { [void]$pnlDetails.Children.Add((New-DetailsText -Text $Title -Size 16 -Weight 'Bold')) }
+    if ($Subtitle) { [void]$pnlDetails.Children.Add((New-DetailsText -Text $Subtitle -Color '#8A80A0' -Margin '0,2,0,0')) }
+    if ($Message)  { [void]$pnlDetails.Children.Add((New-DetailsText -Text $Message -Color '#5E5672' -Margin '0,10,0,0')) }
+    $scrDetails.ScrollToHome()
+}
+
+function ConvertFrom-WingetShow {
+    <#
+      Turns "winget show" output into an ordered set of fields. Top-level lines look like
+      "Publisher: OpenAI"; multi-line values (Description, Release Notes, Tags, ...) follow
+      their label on lines indented by two spaces, one paragraph or item per line.
+    #>
+    param([string[]]$Lines)
+    $fields = [ordered]@{}
+    $current = $null
+    foreach ($line in $Lines) {
+        if ($line -match '^Installer:') { break }          # installer technicalities - not shown
+        if ($line -match '^Found (.+?) \[(.+?)\]\s*$') {
+            $fields['_Name'] = $Matches[1]; $fields['_Id'] = $Matches[2]; continue
+        }
+        if ($line -match '^(\S[^:]*?):\s*(.*)$') {
+            $current = $Matches[1].Trim()
+            $fields[$current] = New-Object System.Collections.Generic.List[string]
+            if ($Matches[2].Trim()) { $fields[$current].Add($Matches[2].Trim()) }
+        } elseif ($current -and $line -match '^\s+(\S.*)$') {
+            $fields[$current].Add($Matches[1].TrimEnd())
+        }
+    }
+    return $fields
 }
 
 function Complete-PackageDetails {
@@ -1818,35 +1878,110 @@ function Complete-PackageDetails {
 
     $lines = @()
     if ($Output) { $lines = $Output -split "`r?`n" }
+    $f = ConvertFrom-WingetShow -Lines $lines
 
-    $start = -1
-    for ($i = 0; $i -lt $lines.Count; $i++) { if ($lines[$i] -match '^Found ') { $start = $i; break } }
-
-    if ($start -lt 0) {
-        $msg = ($lines | Where-Object { $_ -match '\S' }) -join "`r`n"
+    if (-not $f.Contains('_Name')) {
+        $msg = (($lines | Where-Object { $_ -match '\S' }) -join "`r`n").Trim()
         if (-not $msg) { $msg = 'winget returned no details.' }
-        $txtDetails.Text = "$($script:detailsItem.Name)`r`n`r`n$msg"
+        Show-DetailsMessage -Title $script:detailsItem.Name -Message $msg
         Set-DetailsLinks
         return
     }
 
-    # Keep everything from "Found ..." up to the installer technicalities.
-    $kept = New-Object System.Collections.Generic.List[string]
-    for ($i = $start; $i -lt $lines.Count; $i++) {
-        if ($lines[$i] -match '^Installer:') { break }
-        $kept.Add($lines[$i].TrimEnd())
-    }
-    $text = ($kept -join "`r`n").Trim()
-
-    $homepage = $null; $notes = $null
-    foreach ($l in $kept) {
-        if (-not $homepage -and $l -match '^\s*Homepage:\s*(https?://\S+)') { $homepage = $Matches[1] }
-        if (-not $notes -and $l -match '^\s*Release Notes Url:\s*(https?://\S+)') { $notes = $Matches[1] }
+    function Get-Field([string]$Name) {
+        if ($f.Contains($Name) -and $f[$Name].Count -gt 0) { return ($f[$Name] -join ' ').Trim() } else { return '' }
     }
 
-    $txtDetails.Text = $text
-    $txtDetails.ScrollToHome()
-    Set-DetailsLinks -Homepage $homepage -ReleaseNotes $notes
+    $pnlDetails.Children.Clear()
+
+    # Name, Id and version
+    [void]$pnlDetails.Children.Add((New-DetailsText -Text $f['_Name'] -Size 17 -Weight 'Bold'))
+    [void]$pnlDetails.Children.Add((New-DetailsText -Text $f['_Id'] -Color '#8A80A0' -Margin '0,1,0,0'))
+    $version = Get-Field 'Version'
+    if ($version) {
+        $badge = New-Object System.Windows.Controls.Border
+        $badge.CornerRadius = 9
+        $badge.Background   = (New-Object System.Windows.Media.BrushConverter).ConvertFromString('#2B2340')
+        $badge.Padding      = '9,2,9,3'
+        $badge.Margin       = '0,8,0,0'
+        $badge.HorizontalAlignment = 'Left'
+        $badge.Child = New-DetailsText -Text "Version $version" -Size 12 -Weight 'SemiBold' -Color '#FFFFFF'
+        [void]$pnlDetails.Children.Add($badge)
+    }
+
+    # Short facts as label / value rows
+    $facts = @(
+        @('Publisher', 'Publisher'), @('Author', 'Author'), @('License', 'Licence'),
+        @('Copyright', 'Copyright'), @('Moniker', 'Short name')
+    )
+    $grid = New-Object System.Windows.Controls.Grid
+    $grid.Margin = '0,12,0,0'
+    $c1 = New-Object System.Windows.Controls.ColumnDefinition; $c1.Width = 'Auto'
+    $c2 = New-Object System.Windows.Controls.ColumnDefinition; $c2.Width = '*'
+    $grid.ColumnDefinitions.Add($c1); $grid.ColumnDefinitions.Add($c2)
+    $row = 0
+    foreach ($fact in $facts) {
+        $value = Get-Field $fact[0]
+        if (-not $value) { continue }
+        $rd = New-Object System.Windows.Controls.RowDefinition; $rd.Height = 'Auto'
+        $grid.RowDefinitions.Add($rd)
+        $label = New-DetailsText -Text $fact[1] -Size 12 -Weight 'SemiBold' -Color '#8A80A0' -Margin '0,0,12,5'
+        $val   = New-DetailsText -Text $value -Margin '0,0,0,5'
+        [System.Windows.Controls.Grid]::SetRow($label, $row); [System.Windows.Controls.Grid]::SetColumn($label, 0)
+        [System.Windows.Controls.Grid]::SetRow($val, $row);   [System.Windows.Controls.Grid]::SetColumn($val, 1)
+        [void]$grid.Children.Add($label); [void]$grid.Children.Add($val)
+        $row++
+    }
+    if ($row -gt 0) { [void]$pnlDetails.Children.Add($grid) }
+
+    # Description: one paragraph per line, with space between them
+    $desc = if ($f.Contains('Description')) { @($f['Description'] | Where-Object { $_ }) } else { @() }
+    if ($desc.Count -eq 0 -and (Get-Field 'ShortDescription')) { $desc = @(Get-Field 'ShortDescription') }
+    if ($desc.Count -gt 0) {
+        [void]$pnlDetails.Children.Add((New-DetailsHeading 'About'))
+        foreach ($para in $desc) { [void]$pnlDetails.Children.Add((New-DetailsText -Text $para -Margin '0,0,0,8')) }
+    }
+
+    # Release notes, kept to a sensible length
+    $notesText = if ($f.Contains('Release Notes')) { @($f['Release Notes'] | Where-Object { $_ }) } else { @() }
+    if ($notesText.Count -gt 0) {
+        [void]$pnlDetails.Children.Add((New-DetailsHeading "What's new in this version"))
+        $shown = 0
+        foreach ($para in $notesText) {
+            if ($shown -ge 12) {
+                [void]$pnlDetails.Children.Add((New-DetailsText -Text '...more in the release notes.' -Color '#8A80A0'))
+                break
+            }
+            [void]$pnlDetails.Children.Add((New-DetailsText -Text $para -Size 12 -Margin '0,0,0,4'))
+            $shown++
+        }
+    }
+
+    # Tags as little pills
+    $tags = if ($f.Contains('Tags')) { @($f['Tags'] | Where-Object { $_ }) } else { @() }
+    if ($tags.Count -gt 0) {
+        [void]$pnlDetails.Children.Add((New-DetailsHeading 'Tags'))
+        $wrap = New-Object System.Windows.Controls.WrapPanel
+        foreach ($tag in ($tags | Select-Object -First 20)) {
+            $pill = New-Object System.Windows.Controls.Border
+            $pill.CornerRadius = 10
+            $pill.Background   = (New-Object System.Windows.Media.BrushConverter).ConvertFromString('#EEE8FF')
+            $pill.Padding      = '8,2,8,3'
+            $pill.Margin       = '0,0,6,6'
+            $pill.Child = New-DetailsText -Text $tag -Size 12
+            [void]$wrap.Children.Add($pill)
+        }
+        [void]$pnlDetails.Children.Add($wrap)
+    }
+
+    $scrDetails.ScrollToHome()
+
+    $homepage = Get-Field 'Homepage'
+    if (-not $homepage) { $homepage = Get-Field 'Publisher Url' }
+    $notesUrl = Get-Field 'Release Notes Url'
+    if ($homepage -notmatch '^https?://') { $homepage = $null }
+    if ($notesUrl -notmatch '^https?://') { $notesUrl = $null }
+    Set-DetailsLinks -Homepage $homepage -ReleaseNotes $notesUrl
 }
 
 function Open-Url {
@@ -2053,7 +2188,7 @@ function Complete-Cancel {
             Start-CheckForUpdates -KeepLog
         }
         'details' {
-            $txtDetails.Text = 'Cancelled.'
+            Show-DetailsMessage -Message 'Cancelled.'
             Set-UiBusy -Busy $false -Status 'Stopped. No worries.'
         }
         default {
@@ -2391,6 +2526,9 @@ $txtSearchQuery.Add_KeyDown({
 # ---------------------------------------------------------------------------
 $script:AboutWhatsNew = [ordered]@{
     $script:AppVersion = @(
+        'A tidier Details pane: clear headings, label / value rows, separate paragraphs and tags'
+    )
+    '1.15.0' = @(
         'No more command prompt windows popping up while winget runs',
         'A progress card showing what''s happening, how far along it is and how long it''s taken'
     )
@@ -2398,15 +2536,6 @@ $script:AboutWhatsNew = [ordered]@{
         'A friendlier look: a header with the box mascot and a greeting',
         'All the actions in a sidebar of rounded, colour-coded cards',
         'Cheerier messages, and a note from the mascot when a list is empty'
-    )
-    '1.13.0' = @(
-        'Installed Apps view with Uninstall Selected',
-        'Exclude apps from Upgrade All (Excluded Apps view)',
-        'Cancel button for long operations',
-        'Export / Import app lists',
-        'Filter box, Details pane and Save Log',
-        'Remembers your settings and window size',
-        '-UpgradeAll command-line mode for Task Scheduler / Intune'
     )
 }
 
