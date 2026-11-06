@@ -2,6 +2,21 @@
 
 All notable changes to this project are documented here.
 
+## [1.15.4] - 2026-11-06
+### Changed
+- **Friendlier pop-ups.** Every question and note the app shows after it opens now uses its own
+  dialog in the same style as the main window (cream background, mascot header, rounded cards,
+  chunky buttons) instead of the plain Windows message box:
+  - plain, friendly wording ("Update everything?", "Pick some apps first");
+  - buttons that say what they do ("Yes, update all" / "Not now", "Yes, remove" / "Keep them");
+  - the apps involved listed by name with their Id, in a scrolling card (Upgrade All shows
+    what the last check found; Import List shows what's in the file);
+  - a coloured badge for questions, warnings, errors and notes.
+- For risky questions (Uninstall Selected, closing while winget is still working) the safe
+  answer is the default, so pressing Enter doesn't remove anything or stop a job.
+- If the styled dialog ever fails to open, the plain Windows box is shown instead, so a
+  question is never lost.
+
 ## [1.15.3] - 2026-11-06
 ### Fixed
 - **Homepage and Release Notes buttons** filled with little boxes after showing a package's

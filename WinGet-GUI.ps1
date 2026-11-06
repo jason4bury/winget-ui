@@ -55,7 +55,7 @@ param(
 )
 
 # Bump this whenever you ship a change worth noting in CHANGELOG.md.
-$script:AppVersion = '1.15.3'
+$script:AppVersion = '1.15.4'
 
 $script:cliMode = [bool]$UpgradeAll
 $script:showConsole = $script:cliMode -and -not $Silent
@@ -1636,7 +1636,8 @@ function Start-SearchSoftware {
     param([string]$Query)
 
     if ([string]::IsNullOrWhiteSpace($Query)) {
-        [System.Windows.MessageBox]::Show("Type something to search for first, e.g. `"notepad++`".", "Winget GUI", 'OK', 'Warning') | Out-Null
+        [void](Show-FriendlyDialog -Kind Info -Title 'What shall we look for?' -YesText 'Got it' `
+            -Message "Type the name of an app in the search box first - for example notepad++, vlc or 7-zip.")
         return
     }
 
@@ -2015,11 +2016,170 @@ function Open-Url {
 # ---------------------------------------------------------------------------
 # Multi-package queue (Install / Upgrade / Uninstall / Exclude / Remove Exclusion)
 # ---------------------------------------------------------------------------
-function Format-PackageList {
-    param([object[]]$Items, [int]$Max = 15)
-    $lines = @($Items | Select-Object -First $Max | ForEach-Object { "  - $($_.Name) ($($_.Id))" })
-    if ($Items.Count -gt $Max) { $lines += "  ...and $($Items.Count - $Max) more" }
-    return ($lines -join "`r`n")
+function Show-FriendlyDialog {
+    # The app's own pop-up, in place of the plain Windows message box: same cream
+    # background, rounded cards and chunky buttons as the main window.
+    # Returns $true for the Yes/OK button, $false for No or closing the window.
+    param(
+        [string]$Title,
+        [string]$Message,
+        [ValidateSet('Question', 'Warning', 'Error', 'Info')][string]$Kind = 'Info',
+        [object[]]$Items,
+        [string]$ItemsTitle = 'THESE APPS',
+        [string]$YesText = 'OK',
+        [string]$NoText,
+        [switch]$Danger,
+        [int]$MaxItems = 40
+    )
+
+    $look = switch ($Kind) {
+        'Question' { @{ Fill = '#7FD8FF'; Glyph = [string][char]0xE897; Sound = $null } }
+        'Warning'  { @{ Fill = '#FFE066'; Glyph = [string][char]0xE7BA; Sound = 'Exclamation' } }
+        'Error'    { @{ Fill = '#FFB4C2'; Glyph = [string][char]0xE783; Sound = 'Hand' } }
+        default    { @{ Fill = '#7BE0A0'; Glyph = [string][char]0xE946; Sound = $null } }
+    }
+
+    try {
+        [xml]$dlgXaml = @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Width="500" SizeToContent="Height" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="#FFF7EA" FontFamily="Segoe UI" FontSize="13" Foreground="#2B2340">
+    <StackPanel Margin="16">
+        <Border CornerRadius="20" Padding="14,10" BorderBrush="#2B2340" BorderThickness="1.5">
+            <Border.Background>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                    <GradientStop Color="#3FA4EE" Offset="0"/>
+                    <GradientStop Color="#5B6CF0" Offset="1"/>
+                </LinearGradientBrush>
+            </Border.Background>
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Image x:Name="DlgLogo" Width="54" Height="54" Margin="0,0,12,0" RenderOptions.BitmapScalingMode="HighQuality"/>
+                <TextBlock x:Name="DlgTitle" Grid.Column="1" FontSize="19" FontWeight="Bold" Foreground="#FFFFFF"
+                           TextWrapping="Wrap" VerticalAlignment="Center"/>
+            </Grid>
+        </Border>
+
+        <Border Style="{DynamicResource CardBox}" Padding="14,12" Margin="0,14,0,0">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Border x:Name="DlgBadge" Width="40" Height="40" CornerRadius="20" BorderBrush="#2B2340" BorderThickness="1.5"
+                        VerticalAlignment="Top" Margin="0,0,12,0">
+                    <TextBlock x:Name="DlgGlyph" FontFamily="Segoe MDL2 Assets" FontSize="18" Foreground="#2B2340"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+                <TextBlock x:Name="DlgMessage" Grid.Column="1" TextWrapping="Wrap" LineHeight="20" VerticalAlignment="Center"/>
+            </Grid>
+        </Border>
+
+        <Border x:Name="DlgItemsCard" Style="{DynamicResource CardBox}" Padding="14,12" Margin="0,12,0,0" Visibility="Collapsed">
+            <StackPanel>
+                <TextBlock x:Name="DlgItemsTitle" Style="{DynamicResource CardTitle}"/>
+                <ScrollViewer MaxHeight="210" VerticalScrollBarVisibility="Auto">
+                    <StackPanel x:Name="DlgItems"/>
+                </ScrollViewer>
+            </StackPanel>
+        </Border>
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+            <Button x:Name="DlgNo" Tag="&#xE711;" Style="{DynamicResource LilacButton}" Margin="0,0,10,4"/>
+            <Button x:Name="DlgYes" Tag="&#xE73E;" Style="{DynamicResource MintButton}" Margin="0,0,0,4"/>
+        </StackPanel>
+    </StackPanel>
+</Window>
+'@
+        $dlg = [Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $dlgXaml))
+        $dlg.Resources.MergedDictionaries.Add($window.Resources)
+        if ($window.IsLoaded) { $dlg.Owner = $window } else { $dlg.WindowStartupLocation = 'CenterScreen' }
+        if ($window.Icon) { $dlg.Icon = $window.Icon }
+
+        $dlg.Title = $Title
+        $dlg.FindName('DlgLogo').Source  = $imgLogo.Source
+        $dlg.FindName('DlgTitle').Text   = $Title
+        $dlg.FindName('DlgMessage').Text = $Message
+        $dlg.FindName('DlgGlyph').Text   = $look.Glyph
+        $dlg.FindName('DlgBadge').Background = (New-Object System.Windows.Media.BrushConverter).ConvertFromString($look.Fill)
+
+        $list = @($Items | Where-Object { $_ })
+        if ($list.Count -gt 0) {
+            $dlg.FindName('DlgItemsCard').Visibility = 'Visible'
+            $dlg.FindName('DlgItemsTitle').Text = $ItemsTitle
+            $panel = $dlg.FindName('DlgItems')
+            $soft  = (New-Object System.Windows.Media.BrushConverter).ConvertFromString('#5E5672')
+            foreach ($item in ($list | Select-Object -First $MaxItems)) {
+                $row = New-Object System.Windows.Controls.TextBlock
+                $row.TextWrapping = 'Wrap'
+                $row.Margin = New-Object System.Windows.Thickness(2, 0, 0, 5)
+                $row.Inlines.Add((New-Object System.Windows.Documents.Run(([string][char]0x2022) + '  ')))
+                if ($item -is [string]) {
+                    $row.Inlines.Add((New-Object System.Windows.Documents.Run($item)))
+                } else {
+                    $name = New-Object System.Windows.Documents.Run([string]$item.Name)
+                    $name.FontWeight = 'SemiBold'
+                    $row.Inlines.Add($name)
+                    if ($item.Id -and $item.Id -ne $item.Name) {
+                        $id = New-Object System.Windows.Documents.Run("   $($item.Id)")
+                        $id.Foreground = $soft
+                        $id.FontSize = 12
+                        $row.Inlines.Add($id)
+                    }
+                }
+                [void]$panel.Children.Add($row)
+            }
+            if ($list.Count -gt $MaxItems) {
+                $more = New-Object System.Windows.Controls.TextBlock
+                $more.Text = "...and $($list.Count - $MaxItems) more"
+                $more.Foreground = $soft
+                $more.Margin = New-Object System.Windows.Thickness(2, 2, 0, 0)
+                [void]$panel.Children.Add($more)
+            }
+        }
+
+        $yes = $dlg.FindName('DlgYes')
+        $no  = $dlg.FindName('DlgNo')
+        $yes.Content = $YesText
+        if ($Danger) { $yes.Style = $dlg.FindResource('BlushButton') }
+        if ($NoText) {
+            $no.Content = $NoText
+            $no.IsCancel = $true
+            # For risky actions, Enter means "no" - the safe choice has to be the easy one.
+            if ($Danger) { $no.IsDefault = $true } else { $yes.IsDefault = $true }
+        } else {
+            $no.Visibility = 'Collapsed'
+            $yes.IsDefault = $true
+            $yes.IsCancel  = $true
+        }
+        $yes.Add_Click({ param($s, $e) [System.Windows.Window]::GetWindow($s).DialogResult = $true })
+        $no.Add_Click({ param($s, $e) [System.Windows.Window]::GetWindow($s).DialogResult = $false })
+        $dlg.Add_ContentRendered({ param($s, $e)
+            $target = if ($s.FindName('DlgNo').IsDefault) { $s.FindName('DlgNo') } else { $s.FindName('DlgYes') }
+            [void]$target.Focus()
+        })
+
+        if ($look.Sound) { try { [System.Media.SystemSounds]::($look.Sound).Play() } catch { } }
+        return ($dlg.ShowDialog() -eq $true)
+    } catch {
+        # Never lose the question: fall back to the plain Windows box.
+        $text = $Message
+        if (@($Items).Count -gt 0) {
+            $text += "`r`n`r`n" + ((@($Items) | Select-Object -First 15 | ForEach-Object {
+                if ($_ -is [string]) { "  - $_" } else { "  - $($_.Name) ($($_.Id))" } }) -join "`r`n")
+        }
+        $icon = switch ($Kind) { 'Info' { 'Information' } default { $Kind } }
+        if ($NoText) {
+            return ([System.Windows.MessageBox]::Show($text, $Title, 'YesNo', $icon) -eq 'Yes')
+        }
+        [void][System.Windows.MessageBox]::Show($text, $Title, 'OK', $icon)
+        return $true
+    }
 }
 
 function Start-PackageQueue {
@@ -2173,14 +2333,20 @@ function Get-SelectedPackages {
 }
 
 function Confirm-Selection {
-    # Shared "nothing selected" warning + confirmation prompt for the Selected buttons.
-    param([object[]]$Items, [string]$Question, [string]$Title, [string]$Icon = 'Question')
+    # Shared "nothing selected" note + confirmation prompt for the Selected buttons.
+    param(
+        [object[]]$Items, [string]$Question, [string]$Title,
+        [string]$YesText = 'Yes, go ahead', [string]$NoText = 'Not now', [switch]$Danger
+    )
     if ($Items.Count -eq 0) {
-        [System.Windows.MessageBox]::Show("Select one or more packages in the list first (Ctrl+click or Shift+click to select several).", "Winget GUI", 'OK', 'Warning') | Out-Null
+        [void](Show-FriendlyDialog -Kind Info -Title 'Pick some apps first' -YesText 'Got it' `
+            -Message "Click an app in the list to select it. Hold Ctrl to pick a few, or Shift to pick a whole run of them.")
         return $false
     }
-    $answer = [System.Windows.MessageBox]::Show("$Question`r`n`r`n$(Format-PackageList -Items $Items)", $Title, 'YesNo', $Icon)
-    return ($answer -eq 'Yes')
+    $kind  = if ($Danger) { 'Warning' } else { 'Question' }
+    $label = if ($Items.Count -eq 1) { 'THIS APP' } else { "THESE $($Items.Count) APPS" }
+    return (Show-FriendlyDialog -Kind $kind -Title $Title -Message $Question -Items $Items -ItemsTitle $label `
+        -YesText $YesText -NoText $NoText -Danger:$Danger)
 }
 
 # ---------------------------------------------------------------------------
@@ -2415,10 +2581,12 @@ $txtFilter.Add_TextChanged({
 $btnClearFilter.Add_Click({ $txtFilter.Text = '' })
 
 $btnUpgradeAll.Add_Click({
-    $confirm = [System.Windows.MessageBox]::Show(
-        "Run 'winget upgrade --all' now? This will upgrade every package winget can update (excluded apps are skipped).",
-        "Confirm Upgrade All", 'YesNo', 'Question')
-    if ($confirm -eq 'Yes') {
+    $pending = @($script:lastUpdateRows)
+    $confirm = Show-FriendlyDialog -Kind Question -Title 'Update everything?' `
+        -Message "Winget will update every app it has an update for, one after another. Apps you've excluded are skipped." `
+        -Items $pending -ItemsTitle "FOUND IN THE LAST CHECK ($($pending.Count))" `
+        -YesText 'Yes, update all' -NoText 'Not now'
+    if ($confirm) {
         if ($chkRemoveDesktopIcons.IsChecked) {
             $script:preShortcuts = Get-DesktopShortcutSnapshot
             # Everything last listed as outdated is what's about to be upgraded, so only
@@ -2439,35 +2607,40 @@ $btnUpgradeAll.Add_Click({
 
 $btnUpgradeSelected.Add_Click({
     $items = Get-SelectedPackages
-    if (Confirm-Selection -Items $items -Question "Upgrade $($items.Count) package(s) now?" -Title 'Confirm Upgrade') {
+    if (Confirm-Selection -Items $items -Title 'Update these apps?' -YesText 'Yes, update' `
+            -Question "Winget will update each one in turn. You can keep an eye on it in the log while it works.") {
         Start-PackageQueue -Items $items -Action 'upgrade'
     }
 })
 
 $btnInstallSelected.Add_Click({
     $items = Get-SelectedPackages
-    if (Confirm-Selection -Items $items -Question "Install $($items.Count) package(s) now?" -Title 'Confirm Install') {
+    if (Confirm-Selection -Items $items -Title 'Install these apps?' -YesText 'Yes, install' `
+            -Question "Winget will download and install each one in turn.") {
         Start-PackageQueue -Items $items -Action 'install'
     }
 })
 
 $btnUninstallSelected.Add_Click({
     $items = Get-SelectedPackages
-    if (Confirm-Selection -Items $items -Question "Uninstall $($items.Count) app(s)? This removes them from this PC." -Title 'Confirm Uninstall' -Icon 'Warning') {
+    if (Confirm-Selection -Items $items -Title 'Remove these apps?' -YesText 'Yes, remove' -NoText 'Keep them' -Danger `
+            -Question "They'll be uninstalled from this PC. You can always install them again later from Search.") {
         Start-PackageQueue -Items $items -Action 'uninstall'
     }
 })
 
 $btnExcludeSelected.Add_Click({
     $items = Get-SelectedPackages
-    if (Confirm-Selection -Items $items -Question "Exclude $($items.Count) app(s) from Upgrade All? You can still upgrade them one at a time, and undo this from Excluded Apps." -Title 'Confirm Exclude') {
+    if (Confirm-Selection -Items $items -Title 'Leave these out of Upgrade All?' -YesText 'Yes, exclude' `
+            -Question "Upgrade All will skip them from now on. You can still update them one at a time, and bring them back any time from Excluded Apps.") {
         Start-PackageQueue -Items $items -Action 'pin'
     }
 })
 
 $btnRemoveExclusion.Add_Click({
     $items = Get-SelectedPackages
-    if (Confirm-Selection -Items $items -Question "Let Upgrade All upgrade $($items.Count) app(s) again?" -Title 'Confirm Remove Exclusion') {
+    if (Confirm-Selection -Items $items -Title 'Bring these back into Upgrade All?' -YesText 'Yes, include' `
+            -Question "Upgrade All will update them along with everything else again.") {
         Start-PackageQueue -Items $items -Action 'unpin'
     }
 })
@@ -2497,20 +2670,20 @@ $btnImport.Add_Click({
             foreach ($pkg in @($source.Packages)) { if ($pkg.PackageIdentifier) { $ids += $pkg.PackageIdentifier } }
         }
     } catch {
-        [System.Windows.MessageBox]::Show("That file couldn't be read as a winget export list.`r`n`r`n$($_.Exception.Message)", 'Winget GUI', 'OK', 'Error') | Out-Null
+        [void](Show-FriendlyDialog -Kind Error -Title "That file didn't work" -YesText 'OK' `
+            -Message "It couldn't be read as a winget app list. Pick a .json file made with Export List.`r`n`r`nDetails: $($_.Exception.Message)")
         return
     }
     if ($ids.Count -eq 0) {
-        [System.Windows.MessageBox]::Show('That file doesn''t list any packages.', 'Winget GUI', 'OK', 'Warning') | Out-Null
+        [void](Show-FriendlyDialog -Kind Info -Title 'That list is empty' -YesText 'OK' `
+            -Message "There aren't any apps in that file, so there's nothing to install.")
         return
     }
 
-    $preview = (@($ids | Select-Object -First 15 | ForEach-Object { "  - $_" }) -join "`r`n")
-    if ($ids.Count -gt 15) { $preview += "`r`n  ...and $($ids.Count - 15) more" }
-    $confirm = [System.Windows.MessageBox]::Show(
-        "Install the $($ids.Count) app(s) in this list? Apps that are already installed are skipped.`r`n`r`n$preview",
-        'Confirm Import', 'YesNo', 'Question')
-    if ($confirm -ne 'Yes') { return }
+    $confirm = Show-FriendlyDialog -Kind Question -Title 'Install the apps in this list?' `
+        -Message "Winget will install everything in the list. Apps that are already on this PC are skipped." `
+        -Items $ids -ItemsTitle "IN THE LIST ($($ids.Count))" -YesText 'Yes, install' -NoText 'Not now'
+    if (-not $confirm) { return }
 
     if ($chkRemoveDesktopIcons.IsChecked) {
         $script:preShortcuts = Get-DesktopShortcutSnapshot
@@ -2525,7 +2698,8 @@ $btnImport.Add_Click({
 
 $btnSaveLog.Add_Click({
     if ([string]::IsNullOrEmpty($txtLog.Text)) {
-        [System.Windows.MessageBox]::Show('The log is empty.', 'Winget GUI', 'OK', 'Information') | Out-Null
+        [void](Show-FriendlyDialog -Kind Info -Title 'Nothing to save yet' -YesText 'Got it' `
+            -Message "The log is empty. Run a check, search or install first, then save the log.")
         return
     }
     $dialog = New-Object Microsoft.Win32.SaveFileDialog
@@ -2537,15 +2711,17 @@ $btnSaveLog.Add_Click({
         Set-Content -LiteralPath $dialog.FileName -Value $txtLog.Text -Encoding UTF8 -ErrorAction Stop
         $txtStatus.Text = "Log saved to $($dialog.FileName)"
     } catch {
-        [System.Windows.MessageBox]::Show("Couldn't save the log.`r`n`r`n$($_.Exception.Message)", 'Winget GUI', 'OK', 'Error') | Out-Null
+        [void](Show-FriendlyDialog -Kind Error -Title "Couldn't save the log" -YesText 'OK' `
+            -Message "Try a different folder.`r`n`r`nDetails: $($_.Exception.Message)")
     }
 })
 
 $btnResetSources.Add_Click({
-    $confirm = [System.Windows.MessageBox]::Show(
-        "This resets all configured winget sources back to their defaults (any custom sources you added would need to be re-added) and then refreshes them. Use this when package searches are failing, e.g. `"Failed when searching source`". Continue?",
-        "Confirm Reset Sources", 'YesNo', 'Warning')
-    if ($confirm -eq 'Yes') {
+    $confirm = Show-FriendlyDialog -Kind Warning -Title "Reset winget's sources?" `
+        -Message ("This puts winget's app sources back to their defaults and refreshes them. It's the fix to try when searches fail with `"Failed when searching source`".`r`n`r`n" +
+                  "If you've added any custom sources of your own, you'll need to add them again afterwards.") `
+        -YesText 'Yes, reset' -NoText 'Cancel'
+    if ($confirm) {
         Start-WingetOperation -Arguments 'source reset --force' `
             -Mode 'resetSources' -StatusText 'Resetting winget sources...'
     }
@@ -2567,6 +2743,10 @@ $txtSearchQuery.Add_KeyDown({
 # ---------------------------------------------------------------------------
 $script:AboutWhatsNew = [ordered]@{
     $script:AppVersion = @(
+        'Friendlier pop-ups: questions and notes now match the app, with plain wording, clear button labels and the apps listed neatly',
+        'Risky questions (uninstall, close while busy) put the safe answer on Enter'
+    )
+    '1.15.3' = @(
         'Fixed the Homepage and Release Notes buttons showing little boxes instead of their icon',
         'Explains when an app is still listed after upgrading (winget version mismatch) and how to hide it'
     )
@@ -2706,11 +2886,11 @@ $window.Add_Closing({
     param($sender, $e)
     if ($script:proc -and -not $script:proc.HasExited) {
         $pending = $script:queue.Count
-        $extra   = if ($pending -gt 0) { " $pending more queued package(s) will not be processed." } else { '' }
-        $confirm = [System.Windows.MessageBox]::Show(
-            "A winget operation is still running.$extra Exit anyway?",
-            "Confirm Exit", 'YesNo', 'Warning')
-        if ($confirm -ne 'Yes') {
+        $extra   = if ($pending -gt 0) { " The $pending app(s) still waiting in the queue won't be done either." } else { '' }
+        $confirm = Show-FriendlyDialog -Kind Warning -Title 'Winget is still working' `
+            -Message "If you close now, the current job is stopped part-way.$extra" `
+            -YesText 'Close anyway' -NoText 'Keep going' -Danger
+        if (-not $confirm) {
             $e.Cancel = $true
             return
         }

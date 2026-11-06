@@ -32,6 +32,7 @@ A friendly window with a sidebar of colour-coded buttons, a list of packages in 
 - Checkbox to skip the Microsoft Store (`msstore`) source, which avoids a recurring source-agreement prompt on machines where it's never been accepted interactively.
 - Checkbox to include packages with unknown/undetectable versions (`--include-unknown`).
 - Checkbox to automatically remove any new desktop icons (`.lnk`/`.url`, on either your Desktop or the shared Public Desktop) that an install/upgrade creates, so **Upgrade All**/**Upgrade Selected**/**Install Selected** don't leave a trail of shortcuts behind. Keeps checking for 20 seconds after the operation finishes, since some installers create their shortcut via a background process rather than immediately — and only removes a new shortcut if its name plausibly matches the package(s) just installed/upgraded, so icons you already had (including pinned ones) are left alone.
+- **Friendly pop-ups** — questions and notes (confirm an upgrade, nothing selected, close while busy and so on) open in the app's own style rather than a plain Windows box: plain wording, buttons that say what they do ("Yes, update all" / "Not now"), and the apps involved listed neatly by name and Id. For risky ones (uninstall, closing while winget is working) Enter picks the safe answer.
 - **About** window (in the same style as the main window) with what the app does, its version and what's new, plus an **Exit** button.
 - Shows its own icon on the window and taskbar: `WinGet-GUI.ico` is picked up from the same folder as the script, and the compiled `.exe` uses the icon built into it.
 - Relaunches itself elevated (as Administrator) automatically on launch if it isn't already, since installing/upgrading software and managing the shared Public Desktop both normally require it.
@@ -61,7 +62,7 @@ Add `-UpgradeAll` to upgrade everything with no window, write a log file, and ex
 powershell -ExecutionPolicy Bypass -File .\WinGet-GUI.ps1 -UpgradeAll -Silent
 ```
 
-The compiled `.exe` takes the same switches, e.g. `"WinGet-GUI v1.15.3.exe" -UpgradeAll -Silent`.
+The compiled `.exe` takes the same switches, e.g. `"WinGet-GUI v1.15.4.exe" -UpgradeAll -Silent`.
 
 | Switch | What it does |
 | --- | --- |
@@ -80,7 +81,7 @@ If you'd rather distribute a single `.exe` than a `.ps1` (e.g. for deployment vi
 
 Double-click `Build-Exe.cmd` (included in this repo) in the same folder as `WinGet-GUI.ps1` and `WinGet-GUI.ico`. No admin rights or open PowerShell window needed. It builds `WinGet-GUI v<version>.exe` in the same folder.
 
-It sets the execution policy to Bypass for the build only (nothing machine-wide changes), installs the `ps2exe` module for your user the first time it's needed (turning on TLS 1.2 and installing the NuGet provider first, so it works on a fresh PC without prompts), and compiles the exe with the icon and `-STA -requireAdmin -noConsole` switches below. The output is named `WinGet-GUI v<version>.exe` (e.g. `WinGet-GUI v1.15.3.exe`), with `<version>` read straight out of `$script:AppVersion`, so the exe's filename and version metadata can't go stale. Everything shown on screen is also saved to `Build-Exe.log`.
+It sets the execution policy to Bypass for the build only (nothing machine-wide changes), installs the `ps2exe` module for your user the first time it's needed (turning on TLS 1.2 and installing the NuGet provider first, so it works on a fresh PC without prompts), and compiles the exe with the icon and `-STA -requireAdmin -noConsole` switches below. The output is named `WinGet-GUI v<version>.exe` (e.g. `WinGet-GUI v1.15.4.exe`), with `<version>` read straight out of `$script:AppVersion`, so the exe's filename and version metadata can't go stale. Everything shown on screen is also saved to `Build-Exe.log`.
 
 If you'd rather run the ps2exe steps yourself, this is what `Build-Exe.cmd` does:
 
@@ -92,10 +93,10 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 Install-Module -Name ps2exe -Scope CurrentUser -Force
 Import-Module ps2exe
 
-Invoke-ps2exe -inputFile .\WinGet-GUI.ps1 -outputFile ".\WinGet-GUI v1.15.3.exe" `
+Invoke-ps2exe -inputFile .\WinGet-GUI.ps1 -outputFile ".\WinGet-GUI v1.15.4.exe" `
     -STA -requireAdmin -noConsole `
     -iconFile .\WinGet-GUI.ico `
-    -title "Winget Update Manager" -version "1.15.3" -product "Winget GUI"
+    -title "Winget Update Manager" -version "1.15.4" -product "Winget GUI"
 ```
 
 `-STA` and `-requireAdmin` bake the WPF thread and elevation requirements directly into the `.exe`'s manifest, so Windows handles both automatically before the script even runs — the script detects when it's running as a compiled `.exe` and skips its own manual relaunch logic in that case, so you won't get a double UAC prompt. `-noConsole` hides the PowerShell console window behind the GUI. `-iconFile` gives the compiled `.exe` its own icon (`WinGet-GUI.ico`, included in this repo) — it needs a real multi-resolution `.ico` file, not a `.png`/`.jpg` directly. The resulting `WinGet-GUI.exe` is fully standalone (winget itself still needs to be installed on the target machine, as before).
