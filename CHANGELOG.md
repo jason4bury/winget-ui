@@ -13,6 +13,11 @@ All notable changes to this project are documented here.
   different version number to Windows than winget's listing), the log explains why, says it's
   safe to ignore, and suggests Exclude Selected to hide it.
 
+### Docs
+- README brought up to date: the tidier Details pane, the "still listed after upgrading" note
+  (with a Troubleshooting entry), the About window, current version numbers in the examples,
+  the `WinGet-GUI.ps1` file name in Usage, and how winget is now run hidden.
+
 ## [1.15.2] - 2026-11-04
 ### Fixed
 - **Exclude Selected did nothing for apps in the updates list.** With "Skip Microsoft Store
