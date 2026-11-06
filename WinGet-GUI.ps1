@@ -55,7 +55,7 @@ param(
 )
 
 # Bump this whenever you ship a change worth noting in CHANGELOG.md.
-$script:AppVersion = '1.15.1'
+$script:AppVersion = '1.15.3'
 
 $script:cliMode = [bool]$UpgradeAll
 $script:showConsole = $script:cliMode -and -not $Silent
@@ -1035,6 +1035,10 @@ $busyBar              = $window.FindName('BusyBar')
 $txtBusyTime          = $window.FindName('TxtBusyTime')
 $btnBusyCancel        = $window.FindName('BtnBusyCancel')
 $script:busyStart     = $null
+$script:listSource    = ''
+$script:HomepageUrl   = $null
+$script:ReleaseNotesUrl = $null
+$script:JustUpgraded  = @()
 $script:diagTemp      = $null
 
 # ---------------------------------------------------------------------------
@@ -1587,10 +1591,24 @@ function Get-SourceArg {
     if ($chkSkipStore.IsChecked) { return '--source winget' } else { return '' }
 }
 
+function Get-ListSource {
+    # When a list is fetched with "--source winget", winget leaves the Source column out
+    # of its table (every row is from the same source), so the parsed rows come back with
+    # an empty Source. Remember which source was asked for so it can be filled back in.
+    if ($chkSkipStore.IsChecked) { return 'winget' } else { return '' }
+}
+
+function Set-MissingSource {
+    param([object[]]$Rows, [string]$Source)
+    if (-not $Source) { return }
+    foreach ($r in $Rows) { if (-not $r.Source) { $r.Source = $Source } }
+}
+
 function Start-CheckForUpdates {
     param([switch]$KeepLog)
     $extra = if ($chkIncludeUnknown.IsChecked) { '--include-unknown' } else { '' }
     $src   = Get-SourceArg
+    $script:listSource = Get-ListSource
     # --disable-interactivity turns off winget's console-only behaviour (progress bars,
     # width detection, etc). Without it, winget run with redirected output (as we do here,
     # so the log pane can show it) can misbehave in ways that don't show up when you run
@@ -1623,6 +1641,7 @@ function Start-SearchSoftware {
     }
 
     $src      = Get-SourceArg
+    $script:listSource = Get-ListSource
     $escaped  = $Query.Trim()
     Start-WingetOperation -Arguments "search `"$escaped`" $src --accept-source-agreements --disable-interactivity" `
         -Mode 'search' -StatusText "Searching for '$escaped'..."
@@ -1795,9 +1814,10 @@ if ($problems.Count -eq 0) {
 # ---------------------------------------------------------------------------
 function Set-DetailsLinks {
     param([string]$Homepage, [string]$ReleaseNotes)
-    $btnHomepage.Tag           = $Homepage
+    # Kept in variables, not the buttons' Tag - Tag holds each button's icon.
+    $script:HomepageUrl        = $Homepage
+    $script:ReleaseNotesUrl    = $ReleaseNotes
     $btnHomepage.IsEnabled     = [bool]$Homepage
-    $btnReleaseNotes.Tag       = $ReleaseNotes
     $btnReleaseNotes.IsEnabled = [bool]$ReleaseNotes
 }
 
@@ -2111,6 +2131,10 @@ function Complete-PackageQueue {
         'unpin'     { 'Remove exclusion' }
     }
     $okCount = @($script:queueResults | Where-Object { $_.Status -eq 'Done' -and $_.ExitCode -eq 0 }).Count
+    # Remembered so the refreshed list can point out any that winget still offers (see 'check' below).
+    $script:JustUpgraded = if ($script:queueAction -eq 'upgrade') {
+        @($script:queueResults | Where-Object { $_.Status -eq 'Done' -and $_.ExitCode -eq 0 } | ForEach-Object { $_.Id })
+    } else { @() }
 
     Append-Log "`r`n===== $verb summary: $okCount of $($script:queueResults.Count) succeeded =====`r`n"
     foreach ($r in $script:queueResults) {
@@ -2278,13 +2302,30 @@ $timer.Add_Tick({
         switch ($script:mode) {
             'check' {
                 $rows = @(ConvertFrom-WingetUpgradeTable -Lines $lines)
+                Set-MissingSource -Rows $rows -Source $script:listSource
                 $script:lastUpdateRows = $rows
                 Set-GridItems -Rows $rows -Mode 'updates'
                 Set-UiBusy -Busy $false -Status $(if ($rows.Count -eq 0) { "All up to date - nothing to do!" } elseif ($rows.Count -eq 1) { '1 update ready to install.' } else { "$($rows.Count) updates ready to install." })
                 Append-Log "`r`n$($rows.Count) update(s) available.`r`n"
+
+                # Upgraded fine but still listed: the package's version in winget doesn't match the one
+                # the app reports to Windows, so winget will keep offering it. Say so, rather than leaving
+                # it looking like the upgrade failed.
+                $stuck = @($rows | Where-Object { $script:JustUpgraded -contains $_.Id })
+                foreach ($r in $stuck) {
+                    Append-Log (("`r`nNote: {0} upgraded successfully but is still listed ({1} installed, {2} offered). " +
+                        "The app reports a different version number to Windows than winget's listing uses, so winget " +
+                        "will keep offering this update. It's safe to ignore - or select it and click Exclude Selected " +
+                        "to stop it appearing, and Remove Exclusion later.`r`n") -f $r.Name, $r.Version, $r.Available)
+                }
+                if ($stuck.Count -gt 0) {
+                    Set-UiBusy -Busy $false -Status "$($stuck[0].Name) is still listed after upgrading - see the note in the log."
+                }
+                $script:JustUpgraded = @()
             }
             'search' {
                 $rows = @(ConvertFrom-WingetUpgradeTable -Lines $lines)
+                Set-MissingSource -Rows $rows -Source $script:listSource
                 Set-GridItems -Rows $rows -Mode 'search'
                 Set-UiBusy -Busy $false -Status $(if ($rows.Count -eq 0) { "No luck finding '$($txtSearchQuery.Text.Trim())'." } else { "Found $($rows.Count) match(es) for '$($txtSearchQuery.Text.Trim())' - pick some and click Install Selected." })
                 Append-Log "`r`n$($rows.Count) result(s) found. Select one or more (Ctrl+click / Shift+click) and click 'Install Selected' to install them.`r`n"
@@ -2364,8 +2405,8 @@ $btnExcluded.Add_Click({ Start-ListPins })
 $btnCancel.Add_Click({ Request-Cancel })
 $btnBusyCancel.Add_Click({ Request-Cancel })
 $btnDetails.Add_Click({ Show-PackageDetails })
-$btnHomepage.Add_Click({ Open-Url -Url $btnHomepage.Tag })
-$btnReleaseNotes.Add_Click({ Open-Url -Url $btnReleaseNotes.Tag })
+$btnHomepage.Add_Click({ Open-Url -Url $script:HomepageUrl })
+$btnReleaseNotes.Add_Click({ Open-Url -Url $script:ReleaseNotesUrl })
 
 $txtFilter.Add_TextChanged({
     $script:filterText = $txtFilter.Text.Trim()
@@ -2526,6 +2567,14 @@ $txtSearchQuery.Add_KeyDown({
 # ---------------------------------------------------------------------------
 $script:AboutWhatsNew = [ordered]@{
     $script:AppVersion = @(
+        'Fixed the Homepage and Release Notes buttons showing little boxes instead of their icon',
+        'Explains when an app is still listed after upgrading (winget version mismatch) and how to hide it'
+    )
+    '1.15.2' = @(
+        'Fixed Exclude Selected, which skipped every app in the updates list',
+        'Fixed Show Details wrongly saying updates and search results had no winget details'
+    )
+    '1.15.1' = @(
         'A tidier Details pane: clear headings, label / value rows, separate paragraphs and tags'
     )
     '1.15.0' = @(

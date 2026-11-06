@@ -2,6 +2,26 @@
 
 All notable changes to this project are documented here.
 
+## [1.15.3] - 2026-11-06
+### Fixed
+- **Homepage and Release Notes buttons** filled with little boxes after showing a package's
+  details. The web address was stored where the button keeps its icon; it is now kept separately.
+
+### Added
+- **"Still listed after upgrading" note.** When an app upgrades successfully but winget still
+  lists it (for example Internet Download Manager 6.43.18 / 6.43.18.1, where the app reports a
+  different version number to Windows than winget's listing), the log explains why, says it's
+  safe to ignore, and suggests Exclude Selected to hide it.
+
+## [1.15.2] - 2026-11-04
+### Fixed
+- **Exclude Selected did nothing for apps in the updates list.** With "Skip Microsoft Store
+  source" ticked, winget leaves the Source column out of its table, so every row was read with
+  a blank source and then skipped as "not from a winget source". The source the list was
+  fetched from is now filled back in, so excluding works.
+- The same blank source made **Show Details** say updates and search results "weren't
+  installed from a winget source". They now show their details.
+
 ## [1.15.1] - 2026-11-03
 ### Changed
 - **Details pane tidied up.** Instead of winget's raw text run together, it now shows the app
